@@ -8,15 +8,14 @@ from email.mime.text import MIMEText
 
 import matplotlib
 import pandas as pd
-import streamlit as ststreamlit 
+import streamlit as st
 from openai import OpenAI
 
 matplotlib.use("Agg")  # Arayüzsüz arka plan çizimi için zorunlu ayar
 import matplotlib.pyplot as plt
 
-# --- 🔒 GÜVENLİK VE KİMLİK BİLGİLERİ (STREAMLIT SECRETS'TAN OKUNUR) ---
-GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
-SENDER_PASSWORD = st.secrets["SENDER_PASSWORD"]
+# --- GÜVENLİK & KİMLİK BİLGİLERİ ---
+GITHUB_TOKEN = "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"
 
 # E-posta gönderecek hesap bilgi alanları
 SENDER_EMAIL = "hamzaardadagli07@gmail.com"  # Gönderici Gmail adresi
