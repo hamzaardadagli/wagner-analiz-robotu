@@ -1,0 +1,1 @@
+# wagner-analiz-robotu
