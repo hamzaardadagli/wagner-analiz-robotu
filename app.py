@@ -168,14 +168,9 @@ if uploaded_file is not None:
     try:
         df_uploaded = pd.read_excel(uploaded_file)
         
-        # Orijinal sütun isimlerini yedekte tutalım (Hata durumunda ekrana basmak için)
         original_columns = list(df_uploaded.columns)
-        
-        # --- 🚀 GELİŞMİŞ AKILLI SÜTUN EŞLEŞTİRME ALGORİTMASI ---
-        # Sütun isimlerini küçük harfe çevirip temizliyoruz
         cleaned_cols = [str(c).strip().lower() for c in df_uploaded.columns]
         
-        # Mükerrer sütun kontrolü ve benzersizleştirme
         final_cols = []
         seen = {}
         for c in cleaned_cols:
@@ -187,7 +182,6 @@ if uploaded_file is not None:
                 final_cols.append(c)
         df_uploaded.columns = final_cols
         
-        # Akıllı Haritalama Haritası (Genişletilmiş Esnek Kurallar)
         mapping_rules = {
             'tarih': ['tarih', 'tarihi', 'date', 'gün', 'gun'],
             'bolum': ['bölüm', 'bolum', 'department', 'hat', 'kısım', 'kisim'],
@@ -201,12 +195,10 @@ if uploaded_file is not None:
         rename_dict = {}
         mapped_targets = set()
         
-        # Excel'deki her sütunu kurallarımızla tek tek alt metin (substring) olarak eşleştiriyoruz
         for col in df_uploaded.columns:
             matched = False
             for target, aliases in mapping_rules.items():
                 if target not in mapped_targets:
-                    # Sütun adı kural listesindekilerden birini içeriyorsa veya birebir uyuşuyorsa
                     if any(alias in col for alias in aliases):
                         rename_dict[col] = target
                         mapped_targets.add(target)
@@ -224,7 +216,6 @@ if uploaded_file is not None:
             st.sidebar.error(f"⚠️ Hata: Excel dosyasında şu zorunlu sütunlar otomatik eşleştirilemedi: {', '.join(missing_cols)}")
             st.sidebar.markdown("### 🔍 Excel İçeriğinizdeki Sütunlar:")
             st.sidebar.write(original_columns)
-            st.sidebar.info("Lütfen Excel dosyanızdaki sütun başlıklarını kontrol edin veya koddaki 'mapping_rules' alanına ekleyin.")
         else:
             df_to_save = df_uploaded[required_cols].copy()
             df_to_save['tarih'] = pd.to_datetime(df_to_save['tarih']).dt.strftime('%Y-%m-%d')
@@ -260,39 +251,10 @@ if st.sidebar.button("📊 Raporu Yeniden Mail At"):
         else:
             st.sidebar.error(err)
 
-# --- 📘 SIDEBAR: KULLANIM KILAVUZU (TALİMATLAR) ---
+# --- Proje Künyesi ---
 st.sidebar.markdown("---")
-st.sidebar.markdown("# 📘 Sistem Kullanım Kılavuzu")
-
-with st.sidebar.expander("🚀 1. Adım: Veri Yükleme (Excel)", expanded=True):
-    st.markdown("""
-    * Sol panelin en üstündeki **"Browse files"** butonuna basın.
-    * Güncel **Wagner Kablo Üretim Excel** dosyasını yükleyin.
-    * Yükleme anında otomatik olarak veritabanı güncellenir ve **yönetici raporu** e-posta ile gönderilir.
-    """)
-
-with st.sidebar.expander("📬 2. Adım: Manuel Raporlama", expanded=False):
-    st.markdown("""
-    * Gerekirse, sol paneldeki **"📊 Raporu Yeniden Mail At"** butonuna tıklayarak en son haftanın raporunu tekrar gönderebilirsiniz.
-    * Altında açılan **Önizleme** alanından mail içeriğini kontrol edebilirsiniz.
-    """)
-
-with st.sidebar.expander("💬 3. Adım: Yapay Zeka ile Konuşma", expanded=False):
-    st.markdown("""
-    * Ekranın ortasındaki chat kutusuna **Türkçe** sorular yazın.
-    * **Örnek Sorular:**
-      * *En çok fire veren ilk 3 bölüm hangisidir?*
-      * *Hangi bölüm en yüksek ciroyu yaptı?*
-      * *Toplam üretilen malzeme adeti ne kadardır?*
-      * *Haftalık ciro ortalamasını grafik olarak çiz.*
-    """)
-
-st.sidebar.markdown("---")
-
 st.sidebar.info("""
-**🎯 Proje Amacı & Altyapısı** Bu sistem; üretim verilerini analiz eden, iş gücü etkinlik oranlarını (%85 sınırına göre) hesaplayan ve bulut mimarisi üzerinde **7/24 kesintisiz çalışan** yapay zeka destekli bir karar destek robotudur.  
-* **Altyapı:** Streamlit Cloud, SQLite, GPT-4o-Mini  
-* **Geliştiren:** Mühendislik Departmanı Staj Projesi  
+**🎯 Proje Amacı & Altyapısı** Bu sistem; üretim verilerini analiz eden ve iş gücü etkinlik oranlarını (%85 sınırına göre) raporlayan yapay zeka destekli bir karar destek robotudur.  
 """)
 
 # --- 💬 ANA EKRAN: YAPAY ZEKA SORGULAMA CHAT ARAYÜZÜ ---
