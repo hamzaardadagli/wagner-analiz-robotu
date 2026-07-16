@@ -178,40 +178,58 @@ if uploaded_file is not None:
     try:
         df_uploaded = pd.read_excel(uploaded_file)
         
-        # --- ESNEKLİK GÜNCELLEMESİ (Büyük/Küçük Harf ve Boşluk Temizliği) ---
-        # Sütun isimlerindeki tüm boşlukları temizle ve hepsini küçük harfe çevir
-        df_uploaded.columns = df_uploaded.columns.str.strip().str.lower()
-        
-        # Olası farklı sütun isimlerini eşleştirip standartlaştırıyoruz
-        rename_dict = {}
+        # --- MÜKERRER (DUPLICATE) SÜTUN ENGELLEME ---
+        cols = []
+        count = {}
         for col in df_uploaded.columns:
-            if col in ['tarih', 'tarihi', 'date', 'gün', 'gun']:
-                rename_dict[col] = 'tarih'
-            elif col in ['bölüm', 'bolum', 'department', 'hat']:
-                rename_dict[col] = 'bolum'
-            elif col in ['üretim miktarı', 'uretim miktari', 'üretim', 'uretim', 'quantity', 'miktar']:
-                rename_dict[col] = 'uretim_miktari'
-            elif col in ['ciro', 'tutar', 'revenue', 'satış', 'satis']:
-                rename_dict[col] = 'ciro'
-            elif col in ['fire miktarı', 'fire miktari', 'fire', 'waste']:
-                rename_dict[col] = 'fire_miktari'
-            elif col in ['toplam süre', 'toplam sure', 'süre', 'sure']:
-                rename_dict[col] = 'toplam_sure'
-            elif col in ['standart süre', 'standart sure']:
-                rename_dict[col] = 'standart_sure'
-                
+            col_strip = str(col).strip().lower()
+            if col_strip in count:
+                count[col_strip] += 1
+                cols.append(f"{col_strip}_{count[col_strip]}")
+            else:
+                count[col_strip] = 1
+                cols.append(col_strip)
+        df_uploaded.columns = cols
+        
+        # Olası farklı sütun isimlerini standart sütun adlarımıza eşliyoruz
+        rename_dict = {}
+        mapped_targets = set()
+        
+        mapping_rules = {
+            'tarih': ['tarih', 'tarihi', 'date', 'gün', 'gun'],
+            'bolum': ['bölüm', 'bolum', 'department', 'hat'],
+            'uretim_miktari': ['üretim miktarı', 'uretim miktari', 'üretim', 'uretim', 'quantity', 'miktar'],
+            'ciro': ['ciro', 'tutar', 'revenue', 'satış', 'satis'],
+            'fire_miktari': ['fire miktarı', 'fire miktari', 'fire', 'waste'],
+            'toplam_sure': ['toplam süre', 'toplam sure', 'süre', 'sure'],
+            'standart_sure': ['standart süre', 'standart sure']
+        }
+        
+        for col in df_uploaded.columns:
+            for target, aliases in mapping_rules.items():
+                if target not in mapped_targets:
+                    if col in aliases or any(alias in col for alias in aliases):
+                        rename_dict[col] = target
+                        mapped_targets.add(target)
+                        break
+                        
         df_uploaded = df_uploaded.rename(columns=rename_dict)
         
-        # Kritik sütun kontrolü
-        if 'tarih' not in df_uploaded.columns:
-            st.sidebar.error("Hata: Excel dosyasında 'tarih' sütunu bulunamadı! Lütfen kontrol edin.")
+        # Gerekli sütun kontrolü
+        required_cols = ['tarih', 'bolum', 'uretim_miktari', 'ciro', 'fire_miktari', 'toplam_sure', 'standart_sure']
+        missing_cols = [c for c in required_cols if c not in df_uploaded.columns]
+        
+        if missing_cols:
+            st.sidebar.error(f"Hata: Excel dosyasında şu zorunlu sütunlar eşleştirilemedi: {', '.join(missing_cols)}")
         else:
+            df_to_save = df_uploaded[required_cols].copy()
+            
             # Tarih formatlarını standartlaştırma
-            df_uploaded['tarih'] = pd.to_datetime(df_uploaded['tarih']).dt.strftime('%Y-%m-%d')
+            df_to_save['tarih'] = pd.to_datetime(df_to_save['tarih']).dt.strftime('%Y-%m-%d')
             
             # SQLite Veritabanına Yazma (Mevcut verilerin üzerine ekler)
             conn = sqlite3.connect(DB_FILE)
-            df_uploaded.to_sql("uretim", conn, if_exists="append", index=False)
+            df_to_save.to_sql("uretim", conn, if_exists="append", index=False)
             conn.close()
             
             st.sidebar.success("Excel veritabanına başarıyla aktarıldı! 🚀")
