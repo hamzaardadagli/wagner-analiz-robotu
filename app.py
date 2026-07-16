@@ -17,12 +17,12 @@ try:
     GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
     SENDER_PASSWORD = st.secrets["SENDER_PASSWORD"]
 except Exception as e:
-    # Yerelde (kendi bilgisayarında) test ederken şifrelerin patlamaması için yedek plan:
+    # Yerelde test ederken şifrelerin patlamaması için yedek plan:
     GITHUB_TOKEN = "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"
     SENDER_PASSWORD = "aobn icqf ermd rbtk"
 
 SENDER_EMAIL = "hamzaardadagli07@gmail.com"
-RECEIVER_EMAIL = "hamzaardadagli07@gmail.com"  # Testlerin tamamlanınca yöneticinin mailiyle değiştirebilirsin
+RECEIVER_EMAIL = "hamzaardadagli07@gmail.com"  # Yönetici e-posta adresi buraya gelebilir
 
 # --- 🤖 OPENAI (GITHUB MODELS) APİ BAĞLANTISI ---
 client = OpenAI(
@@ -56,7 +56,6 @@ init_db()
 # --- 📊 GRAFİK VE ANALİZ YARDIMCI FONKSİYONLARI ---
 def get_last_7_days_data():
     conn = sqlite3.connect(DB_FILE)
-    # Veritabanındaki en son tarihi bulup son 7 günü dinamik olarak çekiyoruz
     query = """
         SELECT * FROM uretim 
         WHERE tarih >= (SELECT date(MAX(tarih), '-7 days') FROM uretim)
@@ -71,7 +70,6 @@ def generate_report_and_chart():
     if df.empty:
         return None, None, "Veritabanında analiz edilecek son 7 güne ait veri bulunamadı. Lütfen önce sol panelden Excel dosyası yükleyin."
     
-    # Grafik Çizimi (Ciro ve Etkinlik Oranları)
     df['tarih_dt'] = pd.to_datetime(df['tarih'])
     gunluk = df.groupby('tarih_dt').agg({
         'ciro': 'sum',
@@ -79,18 +77,14 @@ def generate_report_and_chart():
         'toplam_sure': 'sum'
     }).reset_index()
     
-    # Etkinlik Oranı = (Standart Süre / Toplam Süre) * 100
     gunluk['etkinlik'] = (gunluk['standart_sure'] / gunluk['toplam_sure']) * 100
     
     fig, ax1 = plt.subplots(figsize=(10, 5))
-    
-    # Ciro Bar Grafiği
     ax1.bar(gunluk['tarih_dt'].dt.strftime('%d-%m'), gunluk['ciro'], color='skyblue', label='Günlük Ciro (TL)')
     ax1.set_xlabel('Tarih')
     ax1.set_ylabel('Ciro (TL)', color='blue')
     ax1.tick_params(axis='y', labelcolor='blue')
     
-    # Etkinlik Çizgi Grafiği (%85 Kritik Sınır)
     ax2 = ax1.twinx()
     ax2.plot(gunluk['tarih_dt'].dt.strftime('%d-%m'), gunluk['etkinlik'], color='red', marker='o', linewidth=2, label='Etkinlik Oranı (%)')
     ax2.axhline(85, color='gray', linestyle='--', alpha=0.7, label='Kritik Sınır (%85)')
@@ -103,7 +97,6 @@ def generate_report_and_chart():
     plt.savefig(chart_path)
     plt.close()
     
-    # AI Analiz Yorumu Hazırlama
     prompt = f"""
     Aşağıda Wagner Kablo fabrikasına ait son 7 günlük üretim performans verileri yer almaktadır:
     {gunluk.to_string(index=False)}
@@ -124,7 +117,6 @@ def generate_report_and_chart():
         
     return chart_path, report_text, None
 
-# --- ✉️ OTOMATİK E-POSTA GÖNDERİM FONKSİYONU ---
 def send_email_report(chart_path, report_text):
     msg = MIMEMultipart()
     msg['From'] = SENDER_EMAIL
@@ -147,7 +139,6 @@ def send_email_report(chart_path, report_text):
     """
     msg.attach(MIMEText(body, 'html'))
     
-    # Grafiği mail içine gömme
     with open(chart_path, 'rb') as f:
         img_data = f.read()
     msg_image = MIMEImage(img_data)
@@ -171,70 +162,79 @@ st.title("🏭 Wagner Kablo - Üretim Analiz ve Otomatik Raporlama Sistemi")
 # --- ⚙️ SOL PANEL (SIDEBAR) ---
 st.sidebar.header("📁 Veri Kaynağı & Yönetim")
 
-# Excel Yükleme Alanı
 uploaded_file = st.sidebar.file_uploader("Üretim Excel Dosyasını Yükleyin (.xlsx)", type=["xlsx"])
 
 if uploaded_file is not None:
     try:
         df_uploaded = pd.read_excel(uploaded_file)
         
-        # --- MÜKERRER (DUPLICATE) SÜTUN ENGELLEME ---
-        cols = []
-        count = {}
-        for col in df_uploaded.columns:
-            col_strip = str(col).strip().lower()
-            if col_strip in count:
-                count[col_strip] += 1
-                cols.append(f"{col_strip}_{count[col_strip]}")
-            else:
-                count[col_strip] = 1
-                cols.append(col_strip)
-        df_uploaded.columns = cols
+        # Orijinal sütun isimlerini yedekte tutalım (Hata durumunda ekrana basmak için)
+        original_columns = list(df_uploaded.columns)
         
-        # Olası farklı sütun isimlerini standart sütun adlarımıza eşliyoruz
+        # --- 🚀 GELİŞMİŞ AKILLI SÜTUN EŞLEŞTİRME ALGORİTMASI ---
+        # Sütun isimlerini küçük harfe çevirip temizliyoruz
+        cleaned_cols = [str(c).strip().lower() for c in df_uploaded.columns]
+        
+        # Mükerrer sütun kontrolü ve benzersizleştirme
+        final_cols = []
+        seen = {}
+        for c in cleaned_cols:
+            if c in seen:
+                seen[c] += 1
+                final_cols.append(f"{c}_{seen[c]}")
+            else:
+                seen[c] = 1
+                final_cols.append(c)
+        df_uploaded.columns = final_cols
+        
+        # Akıllı Haritalama Haritası (Genişletilmiş Esnek Kurallar)
+        mapping_rules = {
+            'tarih': ['tarih', 'tarihi', 'date', 'gün', 'gun'],
+            'bolum': ['bölüm', 'bolum', 'department', 'hat', 'kısım', 'kisim'],
+            'uretim_miktari': ['üretim', 'uretim', 'miktar', 'quantity', 'adet', 'üretilen'],
+            'ciro': ['ciro', 'tutar', 'revenue', 'satış', 'satis', 'kazanç'],
+            'fire_miktari': ['fire', 'waste', 'hurda', 'kayıp', 'kusurlu'],
+            'toplam_sure': ['toplam süre', 'toplam sure', 'toplam_sure', 'süre', 'sure', 'adam saat'],
+            'standart_sure': ['standart', 'standart süre', 'standart sure', 'standart_sure', 'std']
+        }
+        
         rename_dict = {}
         mapped_targets = set()
         
-        mapping_rules = {
-            'tarih': ['tarih', 'tarihi', 'date', 'gün', 'gun'],
-            'bolum': ['bölüm', 'bolum', 'department', 'hat'],
-            'uretim_miktari': ['üretim miktarı', 'uretim miktari', 'üretim', 'uretim', 'quantity', 'miktar'],
-            'ciro': ['ciro', 'tutar', 'revenue', 'satış', 'satis'],
-            'fire_miktari': ['fire miktarı', 'fire miktari', 'fire', 'waste'],
-            'toplam_sure': ['toplam süre', 'toplam sure', 'süre', 'sure'],
-            'standart_sure': ['standart süre', 'standart sure']
-        }
-        
+        # Excel'deki her sütunu kurallarımızla tek tek alt metin (substring) olarak eşleştiriyoruz
         for col in df_uploaded.columns:
+            matched = False
             for target, aliases in mapping_rules.items():
                 if target not in mapped_targets:
-                    if col in aliases or any(alias in col for alias in aliases):
+                    # Sütun adı kural listesindekilerden birini içeriyorsa veya birebir uyuşuyorsa
+                    if any(alias in col for alias in aliases):
                         rename_dict[col] = target
                         mapped_targets.add(target)
+                        matched = True
                         break
-                        
+            if matched:
+                continue
+                
         df_uploaded = df_uploaded.rename(columns=rename_dict)
         
-        # Gerekli sütun kontrolü
         required_cols = ['tarih', 'bolum', 'uretim_miktari', 'ciro', 'fire_miktari', 'toplam_sure', 'standart_sure']
         missing_cols = [c for c in required_cols if c not in df_uploaded.columns]
         
         if missing_cols:
-            st.sidebar.error(f"Hata: Excel dosyasında şu zorunlu sütunlar eşleştirilemedi: {', '.join(missing_cols)}")
+            st.sidebar.error(f"⚠️ Hata: Excel dosyasında şu zorunlu sütunlar otomatik eşleştirilemedi: {', '.join(missing_cols)}")
+            st.sidebar.markdown("### 🔍 Excel İçeriğinizdeki Sütunlar:")
+            st.sidebar.write(original_columns)
+            st.sidebar.info("Lütfen Excel dosyanızdaki sütun başlıklarını kontrol edin veya koddaki 'mapping_rules' alanına ekleyin.")
         else:
             df_to_save = df_uploaded[required_cols].copy()
-            
-            # Tarih formatlarını standartlaştırma
             df_to_save['tarih'] = pd.to_datetime(df_to_save['tarih']).dt.strftime('%Y-%m-%d')
             
-            # SQLite Veritabanına Yazma (Mevcut verilerin üzerine ekler)
             conn = sqlite3.connect(DB_FILE)
             df_to_save.to_sql("uretim", conn, if_exists="append", index=False)
             conn.close()
             
             st.sidebar.success("Excel veritabanına başarıyla aktarıldı! 🚀")
             
-            # Excel yüklenir yüklenmez otomatik analiz ve mail gönderimi tetiklenir
             with st.spinner("Analiz yapılıyor ve yöneticiye e-posta gönderiliyor..."):
                 chart, report, err = generate_report_and_chart()
                 if not err:
@@ -247,7 +247,6 @@ if uploaded_file is not None:
     except Exception as e:
         st.sidebar.error(f"Excel işlenirken hata oluştu: {str(e)}")
 
-# Manuel Rapor Tetikleme Butonu
 if st.sidebar.button("📊 Raporu Yeniden Mail At"):
     with st.spinner("Rapor hazırlanıyor..."):
         chart, report, err = generate_report_and_chart()
@@ -290,7 +289,6 @@ with st.sidebar.expander("💬 3. Adım: Yapay Zeka ile Konuşma", expanded=Fals
 
 st.sidebar.markdown("---")
 
-# Proje Künyesi
 st.sidebar.info("""
 **🎯 Proje Amacı & Altyapısı** Bu sistem; üretim verilerini analiz eden, iş gücü etkinlik oranlarını (%85 sınırına göre) hesaplayan ve bulut mimarisi üzerinde **7/24 kesintisiz çalışan** yapay zeka destekli bir karar destek robotudur.  
 * **Altyapı:** Streamlit Cloud, SQLite, GPT-4o-Mini  
@@ -305,12 +303,10 @@ Bu panel üzerinden üretim veritabanınızla doğal dilde konuşabilirsiniz. Ya
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Eski mesajları ekranda gösterme
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# Kullanıcı yeni soru sorduğunda
 if prompt := st.chat_input("Üretim verileri hakkında bir şey sorun... (Örn: En çok ciro yapan bölüm hangisi?)"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
@@ -319,7 +315,6 @@ if prompt := st.chat_input("Üretim verileri hakkında bir şey sorun... (Örn: 
     with st.chat_message("assistant"):
         with st.spinner("Veritabanı sorgulanıyor..."):
             
-            # Veritabanı yapısını yapay zekaya son derece katı direktiflerle öğretiyoruz
             schema_info = """
             Veritabanı tablosu adı kesinlikle 'uretim' olmalıdır.
             Sütun isimleri birebir şu şekilde ve küçük harf olmalıdır:
@@ -347,7 +342,6 @@ if prompt := st.chat_input("Üretim verileri hakkında bir şey sorun... (Örn: 
             """
             
             try:
-                # 1. Aşama: Doğal dili SQL'e çevir
                 sql_response = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[{"role": "user", "content": ai_prompt}],
@@ -355,12 +349,10 @@ if prompt := st.chat_input("Üretim verileri hakkında bir şey sorun... (Örn: 
                 )
                 generated_sql = sql_response.choices[0].message.content.strip().replace("```sql", "").replace("```", "")
                 
-                # 2. Aşama: SQL'i veritabanında çalıştır
                 conn = sqlite3.connect(DB_FILE)
                 query_result = pd.read_sql_query(generated_sql, conn)
                 conn.close()
                 
-                # 3. Aşama: Elde edilen tablo sonuçlarını yorumlaması için LLM'e geri gönder
                 interpretation_prompt = f"""
                 Kullanıcının sorusu: {prompt}
                 Veritabanından dönen sorgu sonucu:
@@ -377,7 +369,6 @@ if prompt := st.chat_input("Üretim verileri hakkında bir şey sorun... (Örn: 
                 answer = final_response.choices[0].message.content
                 
                 st.markdown(answer)
-                # Tablo sonucunu ekranda göster
                 st.dataframe(query_result)
                 
                 st.session_state.messages.append({"role": "assistant", "content": answer})
