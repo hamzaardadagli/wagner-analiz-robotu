@@ -8,7 +8,7 @@ from email.mime.text import MIMEText
 
 import matplotlib
 import pandas as pd
-import streamlit as ststreamlit run app.py
+import streamlit as ststreamlit 
 from openai import OpenAI
 
 matplotlib.use("Agg")  # Arayüzsüz arka plan çizimi için zorunlu ayar
