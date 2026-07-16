@@ -69,7 +69,7 @@ def get_last_7_days_data():
 def generate_report_and_chart():
     df = get_last_7_days_data()
     if df.empty:
-        return None, None, "Veritabanında analiz edilecek son 7 güne ait veri bulunamadı."
+        return None, None, "Veritabanında analiz edilecek son 7 güne ait veri bulunamadı. Lütfen önce sol panelden Excel dosyası yükleyin."
     
     # Grafik Çizimi (Ciro ve Etkinlik Oranları)
     df['tarih_dt'] = pd.to_datetime(df['tarih'])
@@ -178,25 +178,53 @@ if uploaded_file is not None:
     try:
         df_uploaded = pd.read_excel(uploaded_file)
         
-        # Sütun isimlerini ve tarih formatlarını standartlaştırma
-        df_uploaded['tarih'] = pd.to_datetime(df_uploaded['tarih']).dt.strftime('%Y-%m-%d')
+        # --- ESNEKLİK GÜNCELLEMESİ (Büyük/Küçük Harf ve Boşluk Temizliği) ---
+        # Sütun isimlerindeki tüm boşlukları temizle ve hepsini küçük harfe çevir
+        df_uploaded.columns = df_uploaded.columns.str.strip().str.lower()
         
-        # SQLite Veritabanına Yazma (Mevcut verilerin üzerine ekler)
-        conn = sqlite3.connect(DB_FILE)
-        df_uploaded.to_sql("uretim", conn, if_exists="append", index=False)
-        conn.close()
+        # Olası farklı sütun isimlerini eşleştirip standartlaştırıyoruz
+        rename_dict = {}
+        for col in df_uploaded.columns:
+            if col in ['tarih', 'tarihi', 'date', 'gün', 'gun']:
+                rename_dict[col] = 'tarih'
+            elif col in ['bölüm', 'bolum', 'department', 'hat']:
+                rename_dict[col] = 'bolum'
+            elif col in ['üretim miktarı', 'uretim miktari', 'üretim', 'uretim', 'quantity', 'miktar']:
+                rename_dict[col] = 'uretim_miktari'
+            elif col in ['ciro', 'tutar', 'revenue', 'satış', 'satis']:
+                rename_dict[col] = 'ciro'
+            elif col in ['fire miktarı', 'fire miktari', 'fire', 'waste']:
+                rename_dict[col] = 'fire_miktari'
+            elif col in ['toplam süre', 'toplam sure', 'süre', 'sure']:
+                rename_dict[col] = 'toplam_sure'
+            elif col in ['standart süre', 'standart sure']:
+                rename_dict[col] = 'standart_sure'
+                
+        df_uploaded = df_uploaded.rename(columns=rename_dict)
         
-        st.sidebar.success("Excel veritabanına başarıyla aktarıldı! 🚀")
-        
-        # Excel yüklenir yüklenmez arka planda otomatik analiz ve mail gönderimi tetiklenir
-        with st.spinner("Analiz yapılıyor ve yöneticiye e-posta gönderiliyor..."):
-            chart, report, err = generate_report_and_chart()
-            if not err:
-                success = send_email_report(chart, report)
-                if success:
-                    st.sidebar.info("Haftalık rapor yöneticinize e-posta ile ulaştırıldı! 📬")
-            else:
-                st.sidebar.warning(err)
+        # Kritik sütun kontrolü
+        if 'tarih' not in df_uploaded.columns:
+            st.sidebar.error("Hata: Excel dosyasında 'tarih' sütunu bulunamadı! Lütfen kontrol edin.")
+        else:
+            # Tarih formatlarını standartlaştırma
+            df_uploaded['tarih'] = pd.to_datetime(df_uploaded['tarih']).dt.strftime('%Y-%m-%d')
+            
+            # SQLite Veritabanına Yazma (Mevcut verilerin üzerine ekler)
+            conn = sqlite3.connect(DB_FILE)
+            df_uploaded.to_sql("uretim", conn, if_exists="append", index=False)
+            conn.close()
+            
+            st.sidebar.success("Excel veritabanına başarıyla aktarıldı! 🚀")
+            
+            # Excel yüklenir yüklenmez otomatik analiz ve mail gönderimi tetiklenir
+            with st.spinner("Analiz yapılıyor ve yöneticiye e-posta gönderiliyor..."):
+                chart, report, err = generate_report_and_chart()
+                if not err:
+                    success = send_email_report(chart, report)
+                    if success:
+                        st.sidebar.info("Haftalık rapor yöneticinize e-posta ile ulaştırıldı! 📬")
+                else:
+                    st.sidebar.warning(err)
                 
     except Exception as e:
         st.sidebar.error(f"Excel işlenirken hata oluştu: {str(e)}")
@@ -215,7 +243,7 @@ if st.sidebar.button("📊 Raporu Yeniden Mail At"):
         else:
             st.sidebar.error(err)
 
-# --- 📘 SİDEMAR: KULLANIM KILAVUZU (TALİMATLAR) ---
+# --- 📘 SIDEBAR: KULLANIM KILAVUZU (TALİMATLAR) ---
 st.sidebar.markdown("---")
 st.sidebar.markdown("# 📘 Sistem Kullanım Kılavuzu")
 
@@ -272,23 +300,29 @@ if prompt := st.chat_input("Üretim verileri hakkında bir şey sorun... (Örn: 
         
     with st.chat_message("assistant"):
         with st.spinner("Veritabanı sorgulanıyor..."):
-            # Veritabanı şemasını yapay zekaya tanıtıyoruz
+            
+            # Veritabanı yapısını yapay zekaya son derece katı direktiflerle öğretiyoruz
             schema_info = """
-            Veritabanı tablosu adı: uretim
-            Sütunlar:
-            - tarih (TEXT, format: YYYY-MM-DD)
-            - bolum (TEXT)
-            - uretim_miktari (REAL)
-            - ciro (REAL)
-            - fire_miktari (REAL)
-            - toplam_sure (REAL)
-            - standart_sure (REAL)
+            Veritabanı tablosu adı kesinlikle 'uretim' olmalıdır.
+            Sütun isimleri birebir şu şekilde ve küçük harf olmalıdır:
+            - tarih (TEXT formatında, format: YYYY-MM-DD olarak kaydedilir. Örn: '2026-07-16')
+            - bolum (TEXT formatında. Örn: 'Montaj', 'Kesim')
+            - uretim_miktari (REAL/Sayısal değer)
+            - ciro (REAL/Sayısal değer)
+            - fire_miktari (REAL/Sayısal değer)
+            - toplam_sure (REAL/Sayısal değer)
+            - standart_sure (REAL/Sayısal değer)
+            
+            KRİTİK TALİMATLAR:
+            1. Sadece standart ve geçerli bir SQLite sorgusu üret.
+            2. Çıktı olarak sadece sorguyu ver. Kesinlikle açıklama yazma, markdown kod bloğu (```sql ... ```) kullanma.
+            3. "ciro ortalaması" veya "ortalama ciro" sorulursa SELECT AVG(ciro) FROM uretim sorgusunu kullan. Null (None) dönebilecek durumlarda verileri doğru filtrele.
+            4. SQLite üzerinde çalışacak geçerli bir SQL ifadesi dışında hiçbir metin üretme.
             """
             
             ai_prompt = f"""
-            Sana bir veritabanı şeması ve kullanıcının sorusu verilecek. 
-            Bu şemaya göre kullanıcının sorusuna cevap verecek SQL sorgusunu yaz.
-            Sadece çalıştırılabilir saf SQL kodunu döndür, başka hiçbir şey yazma (markdown kod blokları kullanma).
+            Şemaya göre kullanıcının sorusuna cevap verecek SQL sorgusunu yaz.
+            Yalnızca çalıştırılabilir saf SQL kodunu döndür, başka hiçbir şey yazma (kod blokları kullanma).
             
             Şema: {schema_info}
             Kullanıcı Sorusu: {prompt}
@@ -311,10 +345,10 @@ if prompt := st.chat_input("Üretim verileri hakkında bir şey sorun... (Örn: 
                 # 3. Aşama: Elde edilen tablo sonuçlarını yorumlaması için LLM'e geri gönder
                 interpretation_prompt = f"""
                 Kullanıcının sorusu: {prompt}
-                Veritabanından dönen sonuçlar:
+                Veritabanından dönen sorgu sonucu:
                 {query_result.to_string()}
                 
-                Bu sonuçlara dayanarak kullanıcıya Türkçe, anlaşılır, kibar ve teknik bir dille yanıt yaz.
+                Bu verilere göre kullanıcıya Türkçe, anlaşılır, kibar ve teknik bir dille yanıt yaz. Eğer dönen veri boşsa (None/Boş tablo), kullanıcıya henüz veritabanında bu analizi yapacak veri olmadığını, sol panelden bir Excel yüklemesi yapması gerektiğini hatırlat.
                 """
                 
                 final_response = client.chat.completions.create(
@@ -325,7 +359,7 @@ if prompt := st.chat_input("Üretim verileri hakkında bir şey sorun... (Örn: 
                 answer = final_response.choices[0].message.content
                 
                 st.markdown(answer)
-                # İsteğe bağlı: Tablo sonucunu da ekranda göster
+                # Tablo sonucunu ekranda göster
                 st.dataframe(query_result)
                 
                 st.session_state.messages.append({"role": "assistant", "content": answer})
