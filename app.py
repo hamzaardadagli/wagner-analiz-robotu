@@ -14,15 +14,17 @@ from openai import OpenAI
 matplotlib.use("Agg")  # Arayüzsüz arka plan çizimi için zorunlu ayar
 import matplotlib.pyplot as plt
 
-# --- GÜVENLİK & KİMLİK BİLGİLERİ ---
-GITHUB_TOKEN = "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"
+# --- GÜVENLİK & KİMLİK BİLGİLERİ (STREAMLIT SECRETS'TAN OKUNUYOR) ---
+try:
+    GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
+    SENDER_PASSWORD = st.secrets["SENDER_PASSWORD"]
+except Exception as e:
+    # Yerelde (bilgisayarında) çalıştırırken hata vermemesi için fallback:
+    GITHUB_TOKEN = "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"
+    SENDER_PASSWORD = "aobn icqf ermd rbtk"
 
-# E-posta gönderecek hesap bilgi alanları
-SENDER_EMAIL = "hamzaardadagli07@gmail.com"  # Gönderici Gmail adresi
-SENDER_PASSWORD = (
-    "aobn icqf ermd rbtk"  # Google'dan aldığın 16 haneli Uygulama Şifresi
-)
-RECEIVER_EMAIL = "hamzaardadagli07@gmail.com"  # Raporun gideceği yönetici maili
+SENDER_EMAIL = "hamzaardadagli07@gmail.com"
+RECEIVER_EMAIL = "hamzaardadagli07@gmail.com"
 
 client = OpenAI(
     base_url="https://models.inference.ai.azure.com",
