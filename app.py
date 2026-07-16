@@ -22,7 +22,7 @@ except Exception as e:
     SENDER_PASSWORD = "aobn icqf ermd rbtk"
 
 SENDER_EMAIL = "hamzaardadagli07@gmail.com"
-RECEIVER_EMAIL = "hamzaardadagli07@gmail.com"  # Yönetici e-posta adresi buraya gelebilir
+RECEIVER_EMAIL = "hamzaardadagli07@gmail.com"  # Yönetici e-posta adresi
 
 # --- 🤖 OPENAI (GITHUB MODELS) APİ BAĞLANTISI ---
 client = OpenAI(
@@ -168,73 +168,24 @@ if uploaded_file is not None:
     try:
         df_uploaded = pd.read_excel(uploaded_file)
         
-        original_columns = list(df_uploaded.columns)
-        cleaned_cols = [str(c).strip().lower() for c in df_uploaded.columns]
+        # Orijinal sütun isimlerinin birebir doğru olduğunu varsayıyoruz
+        df_uploaded['tarih'] = pd.to_datetime(df_uploaded['tarih']).dt.strftime('%Y-%m-%d')
         
-        final_cols = []
-        seen = {}
-        for c in cleaned_cols:
-            if c in seen:
-                seen[c] += 1
-                final_cols.append(f"{c}_{seen[c]}")
+        conn = sqlite3.connect(DB_FILE)
+        df_uploaded.to_sql("uretim", conn, if_exists="append", index=False)
+        conn.close()
+        
+        st.sidebar.success("Excel veritabanına başarıyla aktarıldı! 🚀")
+        
+        with st.spinner("Analiz yapılıyor ve yöneticiye e-posta gönderiliyor..."):
+            chart, report, err = generate_report_and_chart()
+            if not err:
+                success = send_email_report(chart, report)
+                if success:
+                    st.sidebar.info("Haftalık rapor yöneticinize e-posta ile ulaştırıldı! 📬")
             else:
-                seen[c] = 1
-                final_cols.append(c)
-        df_uploaded.columns = final_cols
-        
-        mapping_rules = {
-            'tarih': ['tarih', 'tarihi', 'date', 'gün', 'gun'],
-            'bolum': ['bölüm', 'bolum', 'department', 'hat', 'kısım', 'kisim'],
-            'uretim_miktari': ['üretim', 'uretim', 'miktar', 'quantity', 'adet', 'üretilen'],
-            'ciro': ['ciro', 'tutar', 'revenue', 'satış', 'satis', 'kazanç'],
-            'fire_miktari': ['fire', 'waste', 'hurda', 'kayıp', 'kusurlu'],
-            'toplam_sure': ['toplam süre', 'toplam sure', 'toplam_sure', 'süre', 'sure', 'adam saat'],
-            'standart_sure': ['standart', 'standart süre', 'standart sure', 'standart_sure', 'std']
-        }
-        
-        rename_dict = {}
-        mapped_targets = set()
-        
-        for col in df_uploaded.columns:
-            matched = False
-            for target, aliases in mapping_rules.items():
-                if target not in mapped_targets:
-                    if any(alias in col for alias in aliases):
-                        rename_dict[col] = target
-                        mapped_targets.add(target)
-                        matched = True
-                        break
-            if matched:
-                continue
-                
-        df_uploaded = df_uploaded.rename(columns=rename_dict)
-        
-        required_cols = ['tarih', 'bolum', 'uretim_miktari', 'ciro', 'fire_miktari', 'toplam_sure', 'standart_sure']
-        missing_cols = [c for c in required_cols if c not in df_uploaded.columns]
-        
-        if missing_cols:
-            st.sidebar.error(f"⚠️ Hata: Excel dosyasında şu zorunlu sütunlar otomatik eşleştirilemedi: {', '.join(missing_cols)}")
-            st.sidebar.markdown("### 🔍 Excel İçeriğinizdeki Sütunlar:")
-            st.sidebar.write(original_columns)
-        else:
-            df_to_save = df_uploaded[required_cols].copy()
-            df_to_save['tarih'] = pd.to_datetime(df_to_save['tarih']).dt.strftime('%Y-%m-%d')
+                st.sidebar.warning(err)
             
-            conn = sqlite3.connect(DB_FILE)
-            df_to_save.to_sql("uretim", conn, if_exists="append", index=False)
-            conn.close()
-            
-            st.sidebar.success("Excel veritabanına başarıyla aktarıldı! 🚀")
-            
-            with st.spinner("Analiz yapılıyor ve yöneticiye e-posta gönderiliyor..."):
-                chart, report, err = generate_report_and_chart()
-                if not err:
-                    success = send_email_report(chart, report)
-                    if success:
-                        st.sidebar.info("Haftalık rapor yöneticinize e-posta ile ulaştırıldı! 📬")
-                else:
-                    st.sidebar.warning(err)
-                
     except Exception as e:
         st.sidebar.error(f"Excel işlenirken hata oluştu: {str(e)}")
 
@@ -254,7 +205,7 @@ if st.sidebar.button("📊 Raporu Yeniden Mail At"):
 # --- Proje Künyesi ---
 st.sidebar.markdown("---")
 st.sidebar.info("""
-**🎯 Proje Amacı & Altyapısı** Bu sistem; üretim verilerini analiz eden ve iş gücü etkinlik oranlarını (%85 sınırına göre) raporlayan yapay zeka destekli bir karar destek robotudur.  
+**🎯 Proje Amacı & Altyapısı** Bu sistem; üretim verilerini analiz eden ve iş gücü etkinlik oranlarını hesaplayan yapay zeka destekli bir karar destek robotudur.  
 """)
 
 # --- 💬 ANA EKRAN: YAPAY ZEKA SORGULAMA CHAT ARAYÜZÜ ---
@@ -269,7 +220,7 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-if prompt := st.chat_input("Üretim verileri hakkında bir şey sorun... (Örn: En çok ciro yapan bölüm hangisi?)"):
+if prompt := st.chat_input("Üretim verileri hakkında bir şey sorun..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
@@ -278,27 +229,21 @@ if prompt := st.chat_input("Üretim verileri hakkında bir şey sorun... (Örn: 
         with st.spinner("Veritabanı sorgulanıyor..."):
             
             schema_info = """
-            Veritabanı tablosu adı kesinlikle 'uretim' olmalıdır.
-            Sütun isimleri birebir şu şekilde ve küçük harf olmalıdır:
-            - tarih (TEXT formatında, format: YYYY-MM-DD olarak kaydedilir. Örn: '2026-07-16')
-            - bolum (TEXT formatında. Örn: 'Montaj', 'Kesim')
-            - uretim_miktari (REAL/Sayısal değer)
-            - ciro (REAL/Sayısal değer)
-            - fire_miktari (REAL/Sayısal değer)
-            - toplam_sure (REAL/Sayısal değer)
-            - standart_sure (REAL/Sayısal değer)
+            Veritabanı tablosu adı 'uretim'dir.
+            Sütunlar:
+            - tarih (TEXT, YYYY-MM-DD)
+            - bolum (TEXT)
+            - uretim_miktari (REAL)
+            - ciro (REAL)
+            - fire_miktari (REAL)
+            - toplam_sure (REAL)
+            - standart_sure (REAL)
             
-            KRİTİK TALİMATLAR:
-            1. Sadece standart ve geçerli bir SQLite sorgusu üret.
-            2. Çıktı olarak sadece sorguyu ver. Kesinlikle açıklama yazma, markdown kod bloğu (```sql ... ```) kullanma.
-            3. "ciro ortalaması" veya "ortalama ciro" sorulursa SELECT AVG(ciro) FROM uretim sorgusunu kullan. Null (None) dönebilecek durumlarda verileri doğru filtrele.
-            4. SQLite üzerinde çalışacak geçerli bir SQL ifadesi dışında hiçbir metin üretme.
+            SQLite biçiminde sadece geçerli bir SQL kodu üret, açıklama yazma.
             """
             
             ai_prompt = f"""
-            Şemaya göre kullanıcının sorusuna cevap verecek SQL sorgusunu yaz.
-            Yalnızca çalıştırılabilir saf SQL kodunu döndür, başka hiçbir şey yazma (kod blokları kullanma).
-            
+            Şemaya göre kullanıcının sorusuna cevap verecek SQL sorgusunu yaz:
             Şema: {schema_info}
             Kullanıcı Sorusu: {prompt}
             """
@@ -320,7 +265,7 @@ if prompt := st.chat_input("Üretim verileri hakkında bir şey sorun... (Örn: 
                 Veritabanından dönen sorgu sonucu:
                 {query_result.to_string()}
                 
-                Bu verilere göre kullanıcıya Türkçe, anlaşılır, kibar ve teknik bir dille yanıt yaz. Eğer dönen veri boşsa (None/Boş tablo), kullanıcıya henüz veritabanında bu analizi yapacak veri olmadığını, sol panelden bir Excel yüklemesi yapması gerektiğini hatırlat.
+                Kullanıcıya Türkçe, teknik bir yanıt yaz.
                 """
                 
                 final_response = client.chat.completions.create(
@@ -336,6 +281,6 @@ if prompt := st.chat_input("Üretim verileri hakkında bir şey sorun... (Örn: 
                 st.session_state.messages.append({"role": "assistant", "content": answer})
                 
             except Exception as e:
-                error_msg = f"Sorgulama sırasında bir pürüz oluştu. Hata: {str(e)}"
+                error_msg = f"Sorgulama sırasında bir hata oluştu: {str(e)}"
                 st.error(error_msg)
                 st.session_state.messages.append({"role": "assistant", "content": error_msg})
