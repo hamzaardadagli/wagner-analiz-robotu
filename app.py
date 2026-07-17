@@ -15,7 +15,6 @@ matplotlib.use("Agg")  # Arayüzsüz arka plan çizimi için zorunlu ayar
 import matplotlib.pyplot as plt
 
 # --- 🔒 GÜVENLİK VE KİMLİK BİLGİLERİ ---
-# Sadece secrets üzerinden okuma yapıyoruz, kod içinde manuel ezme yapmıyoruz!
 try:
     GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
     SENDER_PASSWORD = st.secrets["SENDER_PASSWORD"]
@@ -26,7 +25,7 @@ except Exception as e:
 # E-posta gönderecek hesap bilgi alanları
 SENDER_EMAIL = "hamzaardadagli07@gmail.com"  # Gönderici Gmail adresi
 RECEIVER_EMAIL = "hamzaardadagli07@gmail.com"  # Raporun gideceği yönetici maili
-DB_NAME = "uretim_analiz.db" # Tüm sistemde ortak kullanılacak veritabanı ismi
+DB_NAME = "uretim_analiz.db"  # Tüm sistemde ortak kullanılacak veritabanı ismi
 
 client = OpenAI(
     base_url="https://models.inference.ai.azure.com",
@@ -362,13 +361,13 @@ def send_advanced_report_email(html_content, bar_png):
 
         server = smtplib.SMTP("smtp.gmail.com", 587)
         server.starttls()
-        # Secrets'tan gelen temiz şifreyi kullanıyoruz
+        # Secrets'tan gelen şifre doğrudan kullanılıyor
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
         server.sendmail(SENDER_EMAIL, RECEIVER_EMAIL, msg.as_string())
         server.quit()
         return True
     except Exception as e:
-        st.sidebar.error(f"E-posta gönderilemedi: {e}")
+        st.sidebar.error(f"E-posta otomatik olarak gönderilemedi: {e}")
         return False
 
 
@@ -386,6 +385,14 @@ database_ready = False
 
 if uploaded_file is not None:
     try:
+        # 1. Dosya adını kontrol ederek mükerrer işlem yapmayı engelle
+        is_new_file = False
+        if "last_processed_file" not in st.session_state:
+            st.session_state.last_processed_file = ""
+            is_new_file = True
+        elif st.session_state.last_processed_file != uploaded_file.name:
+            is_new_file = True
+
         excel_df = pd.read_excel(uploaded_file)
         excel_df.columns = [c.upper().strip() for c in excel_df.columns]
 
@@ -396,15 +403,9 @@ if uploaded_file is not None:
         st.sidebar.success("✅ Excel veritabanına başarıyla aktarıldı!")
         database_ready = True
 
-        # --- ⚡ OTOMATİK MAİL TETİKLEME ---
-        if (
-            "last_processed_file" not in st.session_state
-            or st.session_state.last_processed_file != uploaded_file.name
-        ):
-            with st.sidebar.status(
-                "🚀 Yeni dosya algılandı! Rapor gönderiliyor...",
-                expanded=True,
-            ) as status:
+        # --- ⚡ KESİN OTOMATİK MAİL TETİKLEME ---
+        if is_new_file:
+            with st.sidebar.status("🚀 Yeni dosya algılandı! Rapor gönderiliyor...", expanded=True) as status:
                 report_content, bar_data = generate_advanced_manager_report()
                 mail_success = send_advanced_report_email(report_content, bar_data)
 
@@ -414,13 +415,14 @@ if uploaded_file is not None:
                         state="complete",
                     )
                     st.sidebar.success("📧 Yönetici bilgilendirildi.")
+                    # Sadece mail başarılıysa hafızaya al
+                    st.session_state.last_processed_file = uploaded_file.name
                 else:
                     status.update(
                         label="❌ Rapor gönderilemedi.",
                         state="error",
                     )
-
-            st.session_state.last_processed_file = uploaded_file.name
+                    st.session_state.last_processed_file = ""
 
     except Exception as e:
         st.sidebar.error(f"Dosya işlenirken hata oluştu: {e}")
