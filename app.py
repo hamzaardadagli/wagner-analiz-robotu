@@ -2,6 +2,7 @@ import io
 import re
 import smtplib
 import sqlite3
+import json
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -66,6 +67,43 @@ def veritabanı_sutun_haritasi(conn, tablo_adi="uretim_satis"):
             harita["fire_mik"] = sutun
             harita["fire_miktari"] = sutun
     return harita, gercek_sutunlar
+
+
+# --- 🛠️ AJAN KULLANIMI İÇİN ARKA PLAN FONKSİYONLARI (TOOLS) ---
+def sql_sorgusu_calistir(sql_query):
+    """Veritabanında güvenli bir şekilde SQL sorgusu çalıştırır ve sonuçları döner."""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        # Güvenlik Kontrolü: Sadece veri okuma (SELECT) sorgularına izin verilir
+        cleaned_query = sql_query.strip().upper()
+        if not cleaned_query.startswith("SELECT"):
+            conn.close()
+            return {"error": "Güvenlik uyarısı: Sadece veri okuma (SELECT) sorguları çalıştırılabilir."}
+            
+        df = pd.read_sql_query(sql_query, conn)
+        conn.close()
+        return df.to_dict(orient="records")  # LLM'in rahat okuyabilmesi için JSON formatına benzer dict yapısı
+    except Exception as e:
+        return {"error": f"Sorgu çalıştırılırken hata oluştu: {str(e)}"}
+
+
+def veritabanı_semasını_getir():
+    """Veritabanındaki uretim_satis tablosunun şemasını, kolonlarını ve haritalandırma kurallarını döner."""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        sutun_haritasi, gercek_sutunlar = veritabanı_sutun_haritasi(conn, "uretim_satis")
+        conn.close()
+        return {
+            "tablo_adi": "uretim_satis",
+            "gercek_kolonlar": gercek_sutunlar,
+            "kritik_kurallar": {
+                "fire_kayip_hatalari": f"Eğer kullanıcı fire, kayıp veya kusurlu ürün soruyorsa mutlaka '{sutun_haritasi.get('fire', 'FIRE_MIK')}' sütununu kullanın.",
+                "siralama_kurali": f"En çok fire verenleri sıralarken 'SUM(CAST({sutun_haritasi.get('fire', 'FIRE_MIK')} AS REAL)) AS TOPLAM_FIRE' kullanarak sayısal sıralama yapın.",
+                "filtre_kurali": f"Boş ve sıfır fireli alanları dışarıda bırakmak için 'WHERE {sutun_haritasi.get('fire', 'FIRE_MIK')} > 0 AND {sutun_haritasi.get('fire', 'FIRE_MIK')} IS NOT NULL' koşulunu ekleyin."
+            }
+        }
+    except Exception as e:
+        return {"error": f"Şema okunurken hata oluştu: {str(e)}"}
 
 
 # --- 1. DETAYLI ANALİZ, FORMÜLASYON VE GRAFİK ÜRETİM MOTORU ---
@@ -361,7 +399,6 @@ def send_advanced_report_email(html_content, bar_png):
 
         server = smtplib.SMTP("smtp.gmail.com", 587)
         server.starttls()
-        # Secrets'tan gelen şifre doğrudan kullanılıyor
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
         server.sendmail(SENDER_EMAIL, RECEIVER_EMAIL, msg.as_string())
         server.quit()
@@ -385,7 +422,6 @@ database_ready = False
 
 if uploaded_file is not None:
     try:
-        # 1. Dosya adını kontrol ederek mükerrer işlem yapmayı engelle
         is_new_file = False
         if "last_processed_file" not in st.session_state:
             st.session_state.last_processed_file = ""
@@ -415,7 +451,6 @@ if uploaded_file is not None:
                         state="complete",
                     )
                     st.sidebar.success("📧 Yönetici bilgilendirildi.")
-                    # Sadece mail başarılıysa hafızaya al
                     st.session_state.last_processed_file = uploaded_file.name
                 else:
                     status.update(
@@ -475,7 +510,7 @@ Sistem, yüklenen Excel verilerini SQLite veritabanında arşivler ve yapay zeka
 """)
 
 # --- SADE CHATBOT ALANI ---
-st.markdown("### 💬 Yapay Zeka Analiz Asistanı")
+st.markdown("### 💬 Yapay Zeka Analiz Asistanı (Ajan Modu)")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -493,129 +528,127 @@ if user_input:
         st.write(user_input)
 
     with st.chat_message("assistant"):
-        with st.spinner("Yapay zeka veritabanını analiz ediyor..."):
+        with st.spinner("Ajan veritabanını ve şemayı analiz ediyor..."):
             try:
-                conn = sqlite3.connect(DB_NAME)
+                # --- 🤖 AJAN SİSTEMİ VE ARAÇ TANIMLARI (TOOLS) ---
+                tools = [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "veritabanı_semasını_getir",
+                            "description": "Veritabanındaki tabloları, kolon isimlerini ve hangi kolonun ne anlama geldiğini öğrenmek için bu fonksiyonu çağır.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {}
+                            }
+                        }
+                    },
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "sql_sorgusu_calistir",
+                            "description": "Oluşturulan geçerli SQLite SELECT sorgusunu veritabanında çalıştırıp sonuçları almak için bu fonksiyonu kullan.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "sql_query": {
+                                        "type": "string",
+                                        "description": "Çalıştırılacak geçerli SQLite sorgusu. Örn: SELECT * FROM uretim_satis LIMIT 5"
+                                    }
+                                },
+                                "required": ["sql_query"]
+                            }
+                        }
+                    }
+                ]
 
-                # 💡 AKILLI HARİTALANDIRMA VE TABLO ŞEMASI KORUMASI 💡
-                sutun_haritasi, gercek_sutunlar = veritabanı_sutun_haritasi(
-                    conn, "uretim_satis"
-                )
+                # Ajanın karar döngüsü için başlangıç geçmişi
+                agent_messages = [
+                    {
+                        "role": "system",
+                        "content": "Sen Wagner Kablo üretim veritabanından sorumlu akıllı bir ajansın. Sana verilen araçları (tools) kullanarak kullanıcının sorularını yanıtla. Doğrudan tahmin yürütme, veriyi her zaman araçları kullanarak veritabanından çek. SQL sorgusu üretirken her zaman 'veritabanı_semasını_getir' aracını çağırıp kolon isimlerini kontrol et."
+                    },
+                    {"role": "user", "content": user_input}
+                ]
 
-                # GPT-4o-Mini için şema tanımı
-                schema_desc = f"""
-                Tablo Adı: uretim_satis
-                Tablodaki Gerçek Sütunlar (BÜYÜK/KÜÇÜK HARFE VE TÜRKÇE KARAKTERLERE BİREBİR UYULMALI):
-                {', '.join(gercek_sutunlar)}
-
-                KRİTİK EŞLEŞTİRME VE SIRALAMA KURALLARI:
-                - Eğer kullanıcı fire, kayıp, kusurlu ürün soruyorsa mutlaka '{sutun_haritasi.get('fire', 'FIRE_MIK')}' sütununu kullan.
-                - Sorguda kesinlikle 'FIRE_MİK' sütununu bulamazsan '{sutun_haritasi.get('fire', 'FIRE_MIK')}' karşılığını yaz.
-                - 'FIRE_MİK' isminde Türkçe karakter hatası (İ/I uyuşmazlığı) yapma. Veritabanındaki gerçek sütun adı tam olarak budur.
-                - ÖNEMLİ (SIRALAMA KURALI): En çok fire verenleri sıralarken 'SUM(CAST({sutun_haritasi.get('fire', 'FIRE_MIK')} AS REAL)) AS TOPLAM_FIRE' kullanarak sayısal sıralama yap.
-                - ÖNEMLİ (FİLTRE KURALI): Fire değeri olmayan, null olan veya 0 olan bölümleri listeye almamak için sorguya 'WHERE {sutun_haritasi.get('fire', 'FIRE_MIK')} > 0 AND {sutun_haritasi.get('fire', 'FIRE_MIK')} IS NOT NULL' koşulunu kesinlikle ekle.
-                """
-
-                prompt_for_sql = f"""
-                Sen bir SQL uzmanısın. Sadece verilen tablo şemasındaki gerçek kolon isimlerini birebir kullanarak geçerli bir SQLite sorgusu yaz.
-                Kesinlikle açıklama, yorum veya markdown ekleme.
-                
-                Veritabanı Şeması ve Kuralları:
-                {schema_desc}
-                
-                Kullanıcı Sorusu: {user_input}
-                """
-
+                # 1. Aşama: LLM'e soruyu ve araçları gönderiyoruz
                 response = client.chat.completions.create(
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": "Sen yardımcı, nesnel ve sadece SQLite kodu dönen profesyonel bir veritabanı asistanısın.",
-                        },
-                        {"role": "user", "content": prompt_for_sql},
-                    ],
                     model="gpt-4o-mini",
-                    temperature=0.1,
-                )
-                sql_response = response.choices[0].message.content.strip()
-                sql_query = (
-                    sql_response.replace("```sql", "")
-                    .replace("```", "")
-                    .replace(";", "")
-                    .strip()
+                    messages=agent_messages,
+                    tools=tools,
+                    tool_choice="auto",
+                    temperature=0.1
                 )
 
-                if sql_query.upper().count("SELECT") > 1:
-                    parts = sql_query.split("SELECT")
-                    for part in parts:
-                        if part.strip():
-                            sql_query = "SELECT " + part.strip()
-                            break
+                response_message = response.choices[0].message
+                tool_calls = response_message.tool_calls
 
-                st.caption(f"⚙️ Çalıştırılan SQL Sorgusu: `{sql_query}`")
+                query_result_for_chart = pd.DataFrame()  # Dinamik grafik çizimi için boş df
 
-                query_result = pd.read_sql_query(sql_query, conn)
-                conn.close()
+                if tool_calls:
+                    agent_messages.append(response_message)  # LLM'in kararını geçmişe ekle
 
-                df_string = query_result.to_string()
-                is_truncated = False
-                if len(query_result) > 30:
-                    df_string = query_result.head(30).to_string()
-                    is_truncated = True
+                    # Çağrılmak istenen tüm araçları sırayla çalıştır
+                    for tool_call in tool_calls:
+                        function_name = tool_call.function.name
+                        function_args = json.loads(tool_call.function.arguments)
 
-                prompt_for_answer = f"""
-                Kullanıcının sorusuna karşılık veritabanından alınan veri tablosu aşağıdadır.
-                Sadece bu verilere dayanarak, kendi yorumunu katmadan tamamen Türkçe ve nesnel bir cevap oluştur.
-                Kullanıcı Sorusu: {user_input}
-                Veritabanı Sonucu:
-                {df_string}
-                """
+                        # Aracı tetikleme
+                        if function_name == "veritabanı_semasını_getir":
+                            tool_output = veritabanı_semasını_getir()
+                        elif function_name == "sql_sorgusu_calistir":
+                            sql_to_run = function_args.get("sql_query")
+                            st.caption(f"⚙️ Ajanın Karar Verdiği Sorgu: `{sql_to_run}`")
+                            tool_output = sql_sorgusu_calistir(sql_to_run)
+                            
+                            # Grafik çizimi ihtimaline karşı veriyi pandas dataframe'e alalım
+                            if isinstance(tool_output, list) and len(tool_output) > 0:
+                                query_result_for_chart = pd.DataFrame(tool_output)
+                        else:
+                            tool_output = {"error": "Bilinmeyen fonksiyon."}
 
-                if is_truncated:
-                    prompt_for_answer += "\n\n(Not: Veritabanı çıktısı çok büyük olduğu için sadece ilk 30 satır gönderilmiştir.)"
+                        # Fonksiyonun sonucunu LLM geçmişine ekliyoruz
+                        agent_messages.append({
+                            "tool_call_id": tool_call.id,
+                            "role": "tool",
+                            "name": function_name,
+                            "content": json.dumps(tool_output)
+                        })
 
-                response_ans = client.chat.completions.create(
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": "Sen yardımcı, nesnel ve Türkçe konuşan bir veritabanı analiz asistanısın.",
-                        },
-                        {"role": "user", "content": prompt_for_answer},
-                    ],
-                    model="gpt-4o-mini",
-                    temperature=0.1,
-                )
-                final_response = (
-                    response_ans.choices[0].message.content.strip()
-                )
+                    # 2. Aşama: Elde edilen verilerle LLM'e tekrar gidip nihai cevabı ürettiriyoruz
+                    second_response = client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=agent_messages,
+                        temperature=0.1
+                    )
+                    final_response = second_response.choices[0].message.content
+                else:
+                    final_response = response_message.content
+
+                # Sonucu ekrana yazdır
                 st.write(final_response)
 
+                # Dinamik Grafik Çizimi (Eğer kullanıcı grafik istediyse ve verimiz varsa)
                 grafik_kelimeleri = ["grafik", "görselleştir", "çiz", "chart", "plot", "bar"]
                 if (
                     any(x in user_input.lower() for x in grafik_kelimeleri)
-                    and not query_result.empty
+                    and not query_result_for_chart.empty
                 ):
                     st.info("📊 İstediğiniz analiz için dinamik grafik hazırlanmıştır:")
                     numeric_cols = (
-                        query_result.select_dtypes(include=["number"])
+                        query_result_for_chart.select_dtypes(include=["number"])
                         .columns.tolist()
                     )
-                    x_col = query_result.columns[0]
+                    x_col = query_result_for_chart.columns[0]
                     if numeric_cols:
                         st.bar_chart(
-                            data=query_result, x=x_col, y=numeric_cols[0]
+                            data=query_result_for_chart, x=x_col, y=numeric_cols[0]
                         )
 
-                if is_truncated:
-                    st.dataframe(query_result)
-
+                # Geçmişe kaydet
                 st.session_state.messages.append(
                     {"role": "assistant", "content": final_response}
                 )
 
             except Exception as e:
-                try:
-                    conn.close()
-                except:
-                    pass
                 st.error(f"Sorgulama sırasında bir pürüz oluştu. Hata: {e}")
