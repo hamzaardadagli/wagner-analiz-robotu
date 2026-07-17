@@ -93,13 +93,25 @@ def veritabanı_semasını_getir():
         conn = sqlite3.connect(DB_NAME)
         sutun_haritasi, gercek_sutunlar = veritabanı_sutun_haritasi(conn, "uretim_satis")
         conn.close()
+        
+        # Gerçek veritabanındaki sütunların listesini çıkarıp büyük/küçük harf esnekliğini de ekleyelim
+        ciro_sutunu = next((col for col in gercek_sutunlar if "CIRO" in col.upper() or "KAZANC" in col.upper()), "CIRO")
+        fire_sutunu = next((col for col in gercek_sutunlar if "FIRE" in turkce_karakter_temizle(col) or "ISKARTA" in turkce_karakter_temizle(col)), "FIRE_MIK")
+        bolum_sutunu = next((col for col in gercek_sutunlar if "BOLUM" in turkce_karakter_temizle(col) or "DEPARTMAN" in turkce_karakter_temizle(col)), "BOLUM")
+        uretilen_sutunu = next((col for col in gercek_sutunlar if "URETILEN" in col.upper() or "MIKTAR" in col.upper()), "URETILEN")
+
         return {
             "tablo_adi": "uretim_satis",
             "gercek_kolonlar": gercek_sutunlar,
+            "kolon_haritalama_ipuclari": {
+                "ciro_kolonu": f"Ciro, ciro miktarı veya kazanç sorgularında veritabanındaki gerçek sütun adı: '{ciro_sutunu}'",
+                "fire_kolonu": f"Fire, ıskarta, hurda miktarı veya kalite kayıpları sorgularında veritabanındaki gerçek sütun adı: '{fire_sutunu}'",
+                "bolum_kolonu": f"Bölüm, hat, departman sorgularında veritabanındaki gerçek sütun adı: '{bolum_sutunu}'",
+                "uretilen_kolonu": f"Üretilen miktar, üretim adeti sorgularında veritabanındaki gerçek sütun adı: '{uretilen_sutunu}'"
+            },
             "kritik_kurallar": {
-                "fire_kayip_hatalari": f"Eğer kullanıcı fire, kayıp veya kusurlu ürün soruyorsa mutlaka '{sutun_haritasi.get('fire', 'FIRE_MIK')}' sütununu kullanın.",
-                "siralama_kurali": f"En çok fire verenleri sıralarken 'SUM(CAST({sutun_haritasi.get('fire', 'FIRE_MIK')} AS REAL)) AS TOPLAM_FIRE' kullanarak sayısal sıralama yapın.",
-                "filtre_kurali": f"Boş ve sıfır fireli alanları dışarıda bırakmak için 'WHERE {sutun_haritasi.get('fire', 'FIRE_MIK')} > 0 AND {sutun_haritasi.get('fire', 'FIRE_MIK')} IS NOT NULL' koşulunu ekleyin."
+                "siralama_kurali": f"En çok fire verenleri sıralarken 'SUM(CAST({fire_sutunu} AS REAL)) AS TOPLAM_FIRE' kullanarak sayısal sıralama yapın.",
+                "filtre_kurali": f"Boş ve sıfır fireli alanları dışarıda bırakmak için 'WHERE {fire_sutunu} > 0 AND {fire_sutunu} IS NOT NULL' koşulunu ekleyin."
             }
         }
     except Exception as e:
