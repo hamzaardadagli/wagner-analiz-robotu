@@ -14,18 +14,19 @@ from openai import OpenAI
 matplotlib.use("Agg")  # Arayüzsüz arka plan çizimi için zorunlu ayar
 import matplotlib.pyplot as plt
 
-
-
-# Kodun içinde başka hiçbir yerde GITHUB_TOKEN tanımlaması olmamalı!
-GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
-SENDER_PASSWORD = st.secrets["SENDER_PASSWORD"]
+# --- 🔒 GÜVENLİK VE KİMLİK BİLGİLERİ ---
+# Sadece secrets üzerinden okuma yapıyoruz, kod içinde manuel ezme yapmıyoruz!
+try:
+    GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
+    SENDER_PASSWORD = st.secrets["SENDER_PASSWORD"]
+except Exception as e:
+    st.error("⚠️ Streamlit Secrets ayarları eksik! GITHUB_TOKEN ve SENDER_PASSWORD tanımlı olmalıdır.")
+    st.stop()
 
 # E-posta gönderecek hesap bilgi alanları
 SENDER_EMAIL = "hamzaardadagli07@gmail.com"  # Gönderici Gmail adresi
-SENDER_PASSWORD = (
-    "aobn icqf ermd rbtk"  # Google'dan aldığın 16 haneli Uygulama Şifresi
-,)
 RECEIVER_EMAIL = "hamzaardadagli07@gmail.com"  # Raporun gideceği yönetici maili
+DB_NAME = "uretim_analiz.db" # Tüm sistemde ortak kullanılacak veritabanı ismi
 
 client = OpenAI(
     base_url="https://models.inference.ai.azure.com",
@@ -70,7 +71,7 @@ def veritabanı_sutun_haritasi(conn, tablo_adi="uretim_satis"):
 
 # --- 1. DETAYLI ANALİZ, FORMÜLASYON VE GRAFİK ÜRETİM MOTORU ---
 def generate_advanced_manager_report():
-    conn = sqlite3.connect("uretim_analiz.db")
+    conn = sqlite3.connect(DB_NAME)
 
     # Sütun haritasını çıkararak dinamik sütun belirleyelim
     sutun_haritasi, gercek_sutunlar = veritabanı_sutun_haritasi(
@@ -96,7 +97,6 @@ def generate_advanced_manager_report():
     son_hafta_df = df[(df["TARIH"] >= baslangic_tarihi) & (df["TARIH"] <= max_tarih)]
 
     # --- 🧮 X STANDART SÜRE VE ETKİNLİK FORMÜLASYONU ---
-    # İşlemleri yalnızca son hafta veri çerçevesi (son_hafta_df) üzerinde gerçekleştiriyoruz
     if (
         "LOGOKESIMSURE" in son_hafta_df.columns
         and "LOGOMONTAJSURE" in son_hafta_df.columns
@@ -114,12 +114,11 @@ def generate_advanced_manager_report():
         son_hafta_df["X_STANDART_SURE"] = son_hafta_df["TOPLAM_ADAM_SAAT"] * 0.82
         son_hafta_df["ETKINLIK_DEGERI"] = 82.0
 
-    # Son Haftanın Günlük Ciro Ortalaması (Genel ortalama yerine bunu kullanıyoruz)
+    # Son Haftanın Günlük Ciro Ortalaması
     weekly_daily_totals = son_hafta_df.groupby("TARIH")["CIRO"].sum().reset_index()
     weekly_avg_revenue = weekly_daily_totals["CIRO"].mean()
 
     # Son Gün Verilerinin Filtrelenmesi
-    last_day_date = max_tarih.strftime("%Y-%m-%d")
     last_day_df = son_hafta_df[son_hafta_df["TARIH"] == max_tarih]
 
     # Dinamik Fire Sütunu Tespiti
@@ -176,7 +175,7 @@ def generate_advanced_manager_report():
         efficiency_box_style = "color: #c53030; background-color: #fff5f5; border-left: 4px solid #e53e3e;"
         efficiency_feedback = f"Üretimde hedeflenen standart sürenin gerisinde kalınmıştır. Günlük etkinlik oranınız (%{last_day_efficiency:.1f}) kritik sınırın (%85) altındadır."
 
-    # Karşılaştırma artık GENEL ortalama ile değil, SON HAFTANIN ortalaması ile yapılıyor
+    # Karşılaştırma
     difference_percentage = (
         (last_day_revenue - weekly_avg_revenue) / weekly_avg_revenue
     ) * 100
@@ -264,7 +263,7 @@ def generate_advanced_manager_report():
     bar_img_buf.seek(0)
     plt.close()
 
-    # HTML Şablonu (Son Hafta değerlerine göre biçimlendirilmiş başlıklar)
+    # HTML Şablonu
     report_html = f"""
     <html>
     <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6;">
@@ -363,12 +362,13 @@ def send_advanced_report_email(html_content, bar_png):
 
         server = smtplib.SMTP("smtp.gmail.com", 587)
         server.starttls()
+        # Secrets'tan gelen temiz şifreyi kullanıyoruz
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
         server.sendmail(SENDER_EMAIL, RECEIVER_EMAIL, msg.as_string())
         server.quit()
         return True
     except Exception as e:
-        st.sidebar.error(f"E-posta otomatik olarak gönderilemedi: {e}")
+        st.sidebar.error(f"E-posta gönderilemedi: {e}")
         return False
 
 
@@ -389,39 +389,34 @@ if uploaded_file is not None:
         excel_df = pd.read_excel(uploaded_file)
         excel_df.columns = [c.upper().strip() for c in excel_df.columns]
 
-        conn = sqlite3.connect("uretim_analiz.db")
+        conn = sqlite3.connect(DB_NAME)
         excel_df.to_sql("uretim_satis", conn, if_exists="replace", index=False)
         conn.close()
 
         st.sidebar.success("✅ Excel veritabanına başarıyla aktarıldı!")
         database_ready = True
 
-        # --- ⚡ SİHİRLİ ADIM: OTOMATİK MAİL TETİKLEME ---
+        # --- ⚡ OTOMATİK MAİL TETİKLEME ---
         if (
             "last_processed_file" not in st.session_state
             or st.session_state.last_processed_file != uploaded_file.name
         ):
             with st.sidebar.status(
-                "🚀 Yeni dosya algılandı! Otomatik son hafta raporu hazırlanıyor...",
+                "🚀 Yeni dosya algılandı! Rapor gönderiliyor...",
                 expanded=True,
             ) as status:
-                st.write("📈 Son 7 günün X Standart süre ve %85 sınır etkinlik hesabı yapılıyor...")
                 report_content, bar_data = generate_advanced_manager_report()
-
-                st.write("📬 Rapor şablonu oluşturuldu. Yöneticiye gönderiliyor...")
-                mail_success = send_advanced_report_email(
-                    report_content, bar_data
-                )
+                mail_success = send_advanced_report_email(report_content, bar_data)
 
                 if mail_success:
                     status.update(
-                        label="🚀 Son haftanın raporu başarıyla yöneticiye gönderildi!",
+                        label="🚀 Rapor başarıyla yöneticiye gönderildi!",
                         state="complete",
                     )
                     st.sidebar.success("📧 Yönetici bilgilendirildi.")
                 else:
                     status.update(
-                        label="❌ Mail gönderiminde bir sorun oluştu.",
+                        label="❌ Rapor gönderilemedi.",
                         state="error",
                     )
 
@@ -431,7 +426,7 @@ if uploaded_file is not None:
         st.sidebar.error(f"Dosya işlenirken hata oluştu: {e}")
 else:
     try:
-        conn = sqlite3.connect("uretim_analiz.db")
+        conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
         cursor.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='uretim_satis'"
@@ -451,33 +446,30 @@ if not database_ready:
 # --- YÖNETİCİ MANUEL RAPOR PANELİ ---
 st.sidebar.markdown("---")
 st.sidebar.markdown("# ⚙️ Manuel Kontrol Paneli")
-st.sidebar.write("Gerekirse son hafta raporunu manuel olarak tekrar gönderebilirsiniz.")
 
 if st.sidebar.button("📊 Raporu Yeniden Mail At", key="btn_yonetici_raporu"):
     with st.spinner("Rapor hesaplanıyor ve gönderiliyor..."):
         try:
             report_content, bar_data = generate_advanced_manager_report()
-            send_advanced_report_email(report_content, bar_data)
-            st.sidebar.success("🚀 Son hafta raporu başarıyla gönderildi!")
-            with st.expander("Giden Raporun Önizlemesi", expanded=True):
-                st.html(report_content)
+            if send_advanced_report_email(report_content, bar_data):
+                st.sidebar.success("🚀 Rapor başarıyla gönderildi!")
+                with st.expander("Giden Raporun Önizlemesi", expanded=True):
+                    st.html(report_content)
         except Exception as e:
             st.sidebar.error(f"Hata: {e}")
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("---")
 
 st.sidebar.markdown("""
 ### 📘 Deneyebileceğiniz Örnek Sorular:
-* 📉 *Son 3 yılın en kötü cirolu ayı hangisidir ve toplam ciro ne kadardır?*
+* 📉 *Son 3 yılın en kötü cirolu ayı hangisidir?*
 * 🏢 *Hangi bölüm (BOLUM) en yüksek ciroyu yaptı?*
 * ⚙️ *Toplam üretilen (URETILEN) malzeme adeti ne kadardır?*
 * ⚠️ *En çok fire veren ilk 3 bölüm hangisidir?*
-* 🔍 *Ortalama ciro miktarımız ne kadardır?*
 
 ---
-### 🎯 Projenin Amacı & Çalışma Prensibi
-Bu sistem; mevcut Excel dosyasındaki verileri analiz eder ve talep edilen başlıklara uygun dinamik gösterge panelleri üreten yapay zeka destekli bir analiz robotudur.
+### 🎯 Projenin Çalışma Prensibi
+Sistem, yüklenen Excel verilerini SQLite veritabanında arşivler ve yapay zeka aracılığıyla dilediğiniz analizleri yapmanızı sağlar.
 """)
 
 # --- SADE CHATBOT ALANI ---
@@ -501,7 +493,7 @@ if user_input:
     with st.chat_message("assistant"):
         with st.spinner("Yapay zeka veritabanını analiz ediyor..."):
             try:
-                conn = sqlite3.connect("uretim_analiz.db")
+                conn = sqlite3.connect(DB_NAME)
 
                 # 💡 AKILLI HARİTALANDIRMA VE TABLO ŞEMASI KORUMASI 💡
                 sutun_haritasi, gercek_sutunlar = veritabanı_sutun_haritasi(
@@ -515,11 +507,11 @@ if user_input:
                 {', '.join(gercek_sutunlar)}
 
                 KRİTİK EŞLEŞTİRME VE SIRALAMA KURALLARI:
-                - Eğer kullanıcı fire, kayıp, kusurlu ürün soruyorsa mutlaka '{sutun_haritasi.get('fire', 'FIRE_MİK')}' sütununu kullan.
-                - Sorguda kesinlikle 'FIRE_MİK' sütununu bulamazsan '{sutun_haritasi.get('fire', 'FIRE_MİK')}' karşılığını yaz.
+                - Eğer kullanıcı fire, kayıp, kusurlu ürün soruyorsa mutlaka '{sutun_haritasi.get('fire', 'FIRE_MIK')}' sütununu kullan.
+                - Sorguda kesinlikle 'FIRE_MİK' sütununu bulamazsan '{sutun_haritasi.get('fire', 'FIRE_MIK')}' karşılığını yaz.
                 - 'FIRE_MİK' isminde Türkçe karakter hatası (İ/I uyuşmazlığı) yapma. Veritabanındaki gerçek sütun adı tam olarak budur.
-                - ÖNEMLİ (SIRALAMA KURALI): En çok fire verenleri sıralarken 'SUM(CAST({sutun_haritasi.get('fire', 'FIRE_MİK')} AS REAL)) AS TOPLAM_FIRE' kullanarak sayısal sıralama yap.
-                - ÖNEMLİ (FİLTRE KURALI): Fire değeri olmayan, null olan veya 0 olan bölümleri listeye almamak için sorguya 'WHERE {sutun_haritasi.get('fire', 'FIRE_MİK')} > 0 AND {sutun_haritasi.get('fire', 'FIRE_MİK')} IS NOT NULL' koşulunu kesinlikle ekle.
+                - ÖNEMLİ (SIRALAMA KURALI): En çok fire verenleri sıralarken 'SUM(CAST({sutun_haritasi.get('fire', 'FIRE_MIK')} AS REAL)) AS TOPLAM_FIRE' kullanarak sayısal sıralama yap.
+                - ÖNEMLİ (FİLTRE KURALI): Fire değeri olmayan, null olan veya 0 olan bölümleri listeye almamak için sorguya 'WHERE {sutun_haritasi.get('fire', 'FIRE_MIK')} > 0 AND {sutun_haritasi.get('fire', 'FIRE_MIK')} IS NOT NULL' koşulunu kesinlikle ekle.
                 """
 
                 prompt_for_sql = f"""
@@ -596,15 +588,7 @@ if user_input:
                 )
                 st.write(final_response)
 
-                grafik_kelimeleri = [
-                    "grafik",
-                    "görselleştir",
-                    "çiz",
-                    "chart",
-                    "plot",
-                    "bar",
-                    "grafiği",
-                ]
+                grafik_kelimeleri = ["grafik", "görselleştir", "çiz", "chart", "plot", "bar"]
                 if (
                     any(x in user_input.lower() for x in grafik_kelimeleri)
                     and not query_result.empty
