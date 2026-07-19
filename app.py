@@ -12,10 +12,10 @@ import pandas as pd
 import streamlit as st
 from openai import OpenAI
 
-matplotlib.use("Agg")  # Arayüzsüz arka plan çizimi için zorunlu ayar
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# --- 🔒 GÜVENLİK VE KİMLİK BİLGİLERİ ---
+
 try:
     GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
     SENDER_PASSWORD = st.secrets["SENDER_PASSWORD"]
@@ -23,10 +23,10 @@ except Exception as e:
     st.error("⚠️ Streamlit Secrets ayarları eksik! GITHUB_TOKEN ve SENDER_PASSWORD tanımlı olmalıdır.")
     st.stop()
 
-# E-posta gönderecek hesap bilgi alanları
-SENDER_EMAIL = "hamzaardadagli07@gmail.com"  # Gönderici Gmail adresi
-RECEIVER_EMAIL = "hamzaardadagli07@gmail.com"  # Raporun gideceği yönetici maili
-DB_NAME = "uretim_analiz.db"  # Tüm sistemde ortak kullanılacak veritabanı ismi
+
+SENDER_EMAIL = "hamzaardadagli07@gmail.com"
+RECEIVER_EMAIL = "hamzaardadagli07@gmail.com"
+DB_NAME = "uretim_analiz.db"
 
 client = OpenAI(
     base_url="https://models.inference.ai.azure.com",
@@ -34,7 +34,6 @@ client = OpenAI(
 )
 
 
-# --- 🛠️ TÜRKÇE KARAKTER & AKILLI SÜTUN EŞLEŞTİRME YARDIMCILARI ---
 def turkce_karakter_temizle(metin):
     """Karakter uyuşmazlıklarını çözmek için metni İngilizce karakterlere normalize eder."""
     metin = metin.lower().strip()
@@ -69,60 +68,95 @@ def veritabanı_sutun_haritasi(conn, tablo_adi="uretim_satis"):
     return harita, gercek_sutunlar
 
 
-# --- 🛠️ AJAN KULLANIMI İÇİN ARKA PLAN FONKSİYONLARI (TOOLS) ---
 def sql_sorgusu_calistir(sql_query):
-    """Veritabanında güvenli bir şekilde SQL sorgusu çalıştırır ve sonuçları döner."""
+    """
+    Veritabanında güvenli bir şekilde SQL sorgusu çalıştırır ve sonuçları döner.
+
+    ÖNEMLİ DÜZELTME: df.to_dict(orient="records") kullanmak yerine
+    df.to_json(...) -> json.loads(...) zincirini kullanıyoruz. Çünkü
+    pandas'tan gelen numpy.int64 / numpy.float64 / pandas.Timestamp gibi
+    tipler standart json.dumps() ile serialize edilemiyor ve bu da
+    (dışarıda yakalanan) bir hataya, dolayısıyla modelin çoğu sorguda
+    "cevap veremiyor" gibi görünmesine sebep oluyordu.
+    """
     try:
         conn = sqlite3.connect(DB_NAME)
-        # Güvenlik Kontrolü: Sadece veri okuma (SELECT) sorgularına izin verilir
+
         cleaned_query = sql_query.strip().upper()
         if not cleaned_query.startswith("SELECT"):
             conn.close()
             return {"error": "Güvenlik uyarısı: Sadece veri okuma (SELECT) sorguları çalıştırılabilir."}
-            
+
         df = pd.read_sql_query(sql_query, conn)
         conn.close()
-        return df.to_dict(orient="records")  # LLM'in rahat okuyabilmesi için JSON benzeri yapı
+
+        if df.empty:
+            return {"bilgi": "Sorgu çalıştı fakat sonuç bulunamadı (0 satır)."}
+
+        # numpy / Timestamp tiplerini JSON-uyumlu native tiplere çeviren güvenli yol
+        json_uyumlu_veri = json.loads(df.to_json(orient="records", date_format="iso"))
+        return json_uyumlu_veri
+
     except Exception as e:
-        return {"error": f"Sorgu çalıştırılırken hata oluştu: {str(e)}"}
+        return {"error": f"Sorgu çalıştırılırken hata oluştu: {str(e)}. Lütfen kolon adlarını şemadan tekrar kontrol edip sorguyu düzelt."}
 
 
 def veritabanı_semasını_getir():
-    """Veritabanındaki uretim_satis tablosunun şemasını, kolonlarını ve haritalandırma kurallarını döner."""
+    """
+    Veritabanındaki uretim_satis tablosunun şemasını, kolonlarını,
+    örnek verilerini ve haritalandırma kurallarını döner.
+
+    DÜZELTME: Öncesinde sadece fire ile ilgili kurallar dönüyordu, model
+    diğer kolonların anlamını / veri tiplerini / tarih aralığını tahmin
+    etmek zorunda kalıyordu. Şimdi örnek satırlar, kolon tipleri ve
+    tarih aralığı da ekleniyor, böylece model çok daha az hata yapıyor.
+    """
     try:
         conn = sqlite3.connect(DB_NAME)
         sutun_haritasi, gercek_sutunlar = veritabanı_sutun_haritasi(conn, "uretim_satis")
+
+        df_ornek = pd.read_sql_query("SELECT * FROM uretim_satis LIMIT 3", conn)
+        ornek_satirlar = json.loads(df_ornek.to_json(orient="records", date_format="iso"))
+
+        df_tum = pd.read_sql_query("SELECT * FROM uretim_satis", conn)
+        kolon_tipleri = {col: str(df_tum[col].dtype) for col in df_tum.columns}
+
+        tarih_araligi = None
+        for aday in ["TARIH", "GUN", "Tarih", "Gun"]:
+            if aday in df_tum.columns:
+                try:
+                    tarihler = pd.to_datetime(df_tum[aday], errors="coerce")
+                    tarih_araligi = {
+                        "min": str(tarihler.min()),
+                        "max": str(tarihler.max()),
+                    }
+                except Exception:
+                    pass
+                break
+
         conn.close()
-        
-        # Gerçek veritabanındaki sütunların listesini çıkarıp büyük/küçük harf esnekliğini de ekleyelim
-        ciro_sutunu = next((col for col in gercek_sutunlar if "CIRO" in col.upper() or "KAZANC" in col.upper()), "CIRO")
-        fire_sutunu = next((col for col in gercek_sutunlar if "FIRE" in turkce_karakter_temizle(col) or "ISKARTA" in turkce_karakter_temizle(col)), "FIRE_MIK")
-        bolum_sutunu = next((col for col in gercek_sutunlar if "BOLUM" in turkce_karakter_temizle(col) or "DEPARTMAN" in turkce_karakter_temizle(col)), "BOLUM")
-        uretilen_sutunu = next((col for col in gercek_sutunlar if "URETILEN" in col.upper() or "MIKTAR" in col.upper()), "URETILEN")
 
         return {
             "tablo_adi": "uretim_satis",
             "gercek_kolonlar": gercek_sutunlar,
-            "kolon_haritalama_ipuclari": {
-                "ciro_kolonu": f"Ciro, ciro miktarı veya kazanç sorgularında veritabanındaki gerçek sütun adı: '{ciro_sutunu}'",
-                "fire_kolonu": f"Fire, ıskarta, hurda miktarı veya kalite kayıpları sorgularında veritabanındaki gerçek sütun adı: '{fire_sutunu}'",
-                "bolum_kolonu": f"Bölüm, hat, departman sorgularında veritabanındaki gerçek sütun adı: '{bolum_sutunu}'",
-                "uretilen_kolonu": f"Üretilen miktar, üretim adeti sorgularında veritabanındaki gerçek sütun adı: '{uretilen_sutunu}'"
-            },
+            "kolon_veri_tipleri": kolon_tipleri,
+            "ornek_satirlar": ornek_satirlar,
+            "veride_yer_alan_tarih_araligi": tarih_araligi,
             "kritik_kurallar": {
-                "siralama_kurali": f"En çok fire verenleri sıralarken 'SUM(CAST({fire_sutunu} AS REAL)) AS TOPLAM_FIRE' kullanarak sayısal sıralama yapın.",
-                "filtre_kurali": f"Boş ve sıfır fireli alanları dışarıda bırakmak için 'WHERE {fire_sutunu} > 0 AND {fire_sutunu} IS NOT NULL' koşulunu ekleyin."
-            }
+                "fire_kayip_hatalari": f"Eğer kullanıcı fire, kayıp veya kusurlu ürün soruyorsa mutlaka '{sutun_haritasi.get('fire', 'FIRE_MIK')}' sütununu kullanın.",
+                "siralama_kurali": f"En çok fire verenleri sıralarken 'SUM(CAST({sutun_haritasi.get('fire', 'FIRE_MIK')} AS REAL)) AS TOPLAM_FIRE' kullanarak sayısal sıralama yapın.",
+                "filtre_kurali": f"Boş ve sıfır fireli alanları dışarıda bırakmak için 'WHERE {sutun_haritasi.get('fire', 'FIRE_MIK')} > 0 AND {sutun_haritasi.get('fire', 'FIRE_MIK')} IS NOT NULL' koşulunu ekleyin.",
+                "tarih_kurali": "Ay/yıl bazlı analizlerde SQLite'ın strftime('%Y-%m', TARIH) fonksiyonunu kullanın.",
+                "genel_kural": "Sorguyu yazmadan önce 'ornek_satirlar' ve 'kolon_veri_tipleri' alanlarına bakarak kolonların gerçek içeriğini ve formatını doğrula.",
+            },
         }
     except Exception as e:
         return {"error": f"Şema okunurken hata oluştu: {str(e)}"}
 
 
-# --- 1. DETAYLI ANALİZ, FORMÜLASYON VE GRAFİK ÜRETİM MOTORU ---
 def generate_advanced_manager_report():
     conn = sqlite3.connect(DB_NAME)
 
-    # Sütun haritasını çıkararak dinamik sütun belirleyelim
     sutun_haritasi, gercek_sutunlar = veritabanı_sutun_haritasi(
         conn, "uretim_satis"
     )
@@ -132,7 +166,6 @@ def generate_advanced_manager_report():
 
     df.columns = [c.upper().strip() for c in df.columns]
 
-    # Tarih formatlama ve sıralama
     if "TARIH" in df.columns:
         df["TARIH"] = pd.to_datetime(df["TARIH"])
         df = df.sort_values(by="TARIH")
@@ -140,12 +173,10 @@ def generate_advanced_manager_report():
         df["TARIH"] = pd.to_datetime(df["GUN"])
         df = df.sort_values(by="TARIH")
 
-    # --- ⏳ SON HAFTANIN (SON 7 GÜN) FİLTRELENMESİ ---
     max_tarih = df["TARIH"].max()
-    baslangic_tarihi = max_tarih - pd.Timedelta(days=6)  # Son 7 gün (en son gün dahil)
+    baslangic_tarihi = max_tarih - pd.Timedelta(days=6)
     son_hafta_df = df[(df["TARIH"] >= baslangic_tarihi) & (df["TARIH"] <= max_tarih)]
 
-    # --- 🧮 X STANDART SÜRE VE ETKİNLİK FORMÜLASYONU ---
     if (
         "LOGOKESIMSURE" in son_hafta_df.columns
         and "LOGOMONTAJSURE" in son_hafta_df.columns
@@ -163,28 +194,24 @@ def generate_advanced_manager_report():
         son_hafta_df["X_STANDART_SURE"] = son_hafta_df["TOPLAM_ADAM_SAAT"] * 0.82
         son_hafta_df["ETKINLIK_DEGERI"] = 82.0
 
-    # Son Haftanın Günlük Ciro Ortalaması
     weekly_daily_totals = son_hafta_df.groupby("TARIH")["CIRO"].sum().reset_index()
     weekly_avg_revenue = weekly_daily_totals["CIRO"].mean()
 
-    # Son Gün Verilerinin Filtrelenmesi
     last_day_df = son_hafta_df[son_hafta_df["TARIH"] == max_tarih]
 
-    # Dinamik Fire Sütunu Tespiti
     fire_sutun_adi = (
         sutun_haritasi.get("fire", "FIRE_MIK").upper().strip()
     )
 
-    # Son Günün Değerleri
     last_day_production = (
         last_day_df["URETILEN"].sum() if "URETILEN" in last_day_df.columns else 0
     )
-    
+
     if fire_sutun_adi in last_day_df.columns:
         last_day_scrap = pd.to_numeric(last_day_df[fire_sutun_adi], errors='coerce').sum()
     else:
         last_day_scrap = 0
-        
+
     last_day_hours = (
         last_day_df["TOPLAM_ADAM_SAAT"].sum()
         if "TOPLAM_ADAM_SAAT" in last_day_df.columns
@@ -224,7 +251,6 @@ def generate_advanced_manager_report():
         efficiency_box_style = "color: #c53030; background-color: #fff5f5; border-left: 4px solid #e53e3e;"
         efficiency_feedback = f"Üretimde hedeflenen standart sürenin gerisinde kalınmıştır. Günlük etkinlik oranınız (%{last_day_efficiency:.1f}) kritik sınırın (%85) altındadır."
 
-    # Karşılaştırma
     difference_percentage = (
         (last_day_revenue - weekly_avg_revenue) / weekly_avg_revenue
     ) * 100
@@ -235,12 +261,10 @@ def generate_advanced_manager_report():
         ciro_feedback_style = "color: #744210; background-color: #fffaf0; border-left: 4px solid #dd6b20;"
         ciro_feedback_text = f"🟠 <b>Son Gün Ciro Analizi:</b> Son gün gerçekleşen ciro ({last_day_revenue:,.2f} TL/€), <b>son haftanın günlük ciro ortalamasının ({weekly_avg_revenue:,.2f} TL/€)</b> <b>%{abs(difference_percentage):.1f} altında</b> kalmıştır."
 
-    # Son Haftanın En Yüksek Ciro Günü
     max_revenue_row = weekly_daily_totals.loc[weekly_daily_totals["CIRO"].idxmax()]
     max_revenue_date = max_revenue_row["TARIH"].strftime("%Y-%m-%d")
     max_revenue_val = max_revenue_row["CIRO"]
 
-    # Son Haftanın En Çok Üretilen Malzemesi
     son_hafta_sorted_by_production = son_hafta_df.sort_values(by="URETILEN", ascending=False)
     most_produced_material = (
         son_hafta_sorted_by_production["MALZEME_KOD"].iloc[0]
@@ -253,13 +277,11 @@ def generate_advanced_manager_report():
         else 0
     )
 
-    # Son Haftanın Bölüm Bazlı Toplam Ciroları
     revenue_by_section = son_hafta_df.groupby("BOLUM")["CIRO"].sum().reset_index()
     section_rows_html = ""
     for _, row in revenue_by_section.iterrows():
         section_rows_html += f"<tr><td>{row['BOLUM']}</td><td style='font-weight: bold;'>{row['CIRO']:,.2f}</td></tr>"
 
-    # --- 📈 ÇUBUK GRAFİĞİ ÜRETİMİ (SADECE SON 7 GÜN) ---
     daily_efficiency = (
         son_hafta_df.groupby("TARIH")
         .apply(
@@ -312,7 +334,6 @@ def generate_advanced_manager_report():
     bar_img_buf.seek(0)
     plt.close()
 
-    # HTML Şablonu
     report_html = f"""
     <html>
     <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6;">
@@ -411,7 +432,7 @@ def send_advanced_report_email(html_content, bar_png):
 
         server = smtplib.SMTP("smtp.gmail.com", 587)
         server.starttls()
-        # Secrets'tan gelen şifre doğrudan kullanılıyor
+
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
         server.sendmail(SENDER_EMAIL, RECEIVER_EMAIL, msg.as_string())
         server.quit()
@@ -421,11 +442,10 @@ def send_advanced_report_email(html_content, bar_png):
         return False
 
 
-# --- STREAMLIT ARAYÜZÜ ---
 st.set_page_config(page_title="Üretim & Ciro Analiz Robotu (AI)", layout="wide")
 st.title("🤖 GitHub & GPT-4o-Mini Destekli Analiz Robotu")
 
-# --- 🚀 AKILLI OTOMATİK SÜRÜKLE-BIRAK ALANI ---
+
 st.sidebar.markdown("# 📁 Veri Kaynağı Güncelleme")
 uploaded_file = st.sidebar.file_uploader(
     "Wagner Kablo Excel Dosyasını Yükleyin", type=["xlsx", "xls"]
@@ -452,7 +472,6 @@ if uploaded_file is not None:
         st.sidebar.success("✅ Excel veritabanına başarıyla aktarıldı!")
         database_ready = True
 
-        # --- ⚡ KESİN OTOMATİK MAİL TETİKLEME ---
         if is_new_file:
             with st.sidebar.status("🚀 Yeni dosya algılandı! Rapor gönderiliyor...", expanded=True) as status:
                 report_content, bar_data = generate_advanced_manager_report()
@@ -493,7 +512,7 @@ if not database_ready:
     )
     st.stop()
 
-# --- YÖNETİCİ MANUEL RAPOR PANELİ ---
+
 st.sidebar.markdown("---")
 st.sidebar.markdown("# ⚙️ Manuel Kontrol Paneli")
 
@@ -523,7 +542,6 @@ Sistem, yüklenen Excel verilerini SQLite veritabanında arşivler ve yapay zeka
 """)
 
 
-# --- SADE CHATBOT ALANI ---
 st.markdown("### 💬 Yapay Zeka Analiz Asistanı (Ajan Modu)")
 
 if "messages" not in st.session_state:
@@ -544,13 +562,12 @@ if user_input:
     with st.chat_message("assistant"):
         with st.spinner("Ajan veritabanını analiz ediyor..."):
             try:
-                # --- 🤖 AJAN SİSTEMİ VE ARAÇ TANIMLARI (TOOLS) ---
                 tools = [
                     {
                         "type": "function",
                         "function": {
                             "name": "get_database_schema",
-                            "description": "Veritabanındaki tabloları, kolon isimlerini ve hangi kolonun ne anlama geldiğini öğrenmek için bu fonksiyonu çağır.",
+                            "description": "Veritabanındaki tabloları, kolon isimlerini, örnek verileri ve hangi kolonun ne anlama geldiğini öğrenmek için bu fonksiyonu çağır. SQL yazmadan ÖNCE mutlaka bunu çağır.",
                             "parameters": {
                                 "type": "object",
                                 "properties": {}
@@ -561,7 +578,7 @@ if user_input:
                         "type": "function",
                         "function": {
                             "name": "run_sql_query",
-                            "description": "Oluşturulan geçerli SQLite SELECT sorgusunu veritabanında çalıştırıp sonuçları almak için bu fonksiyonu kullan.",
+                            "description": "Oluşturulan geçerli SQLite SELECT sorgusunu veritabanında çalıştırıp sonuçları almak için bu fonksiyonu kullan. Sorgu hata verirse veya beklenmeyen sonuç dönerse, hatayı dikkate alarak sorguyu düzeltip TEKRAR çağırabilirsin.",
                             "parameters": {
                                 "type": "object",
                                 "properties": {
@@ -576,74 +593,78 @@ if user_input:
                     }
                 ]
 
-                # Ajanın karar döngüsü için başlangıç geçmişi
                 agent_messages = [
                     {
                         "role": "system",
-                        "content": "Sen Wagner Kablo üretim veritabanından sorumlu akıllı bir ajansın. Sana verilen araçları (tools) kullanarak kullanıcının sorularını yanıtla. Teknik detayları, SQL kodlarını veya hangi aracı çalıştıracağını asla kullanıcıya söyleme. Doğrudan veritabanından aldığın verileri yorumlayıp nihai Türkçe cevabı ver."
+                        "content": (
+                            "Sen Wagner Kablo üretim veritabanından sorumlu akıllı bir ajansın. "
+                            "Sana verilen araçları (tools) kullanarak kullanıcının sorularını yanıtla. "
+                            "ADIMLAR: 1) Emin değilsen önce get_database_schema çağırarak kolonları ve örnek verileri incele. "
+                            "2) Sonra run_sql_query ile doğru SQLite sorgusunu çalıştır. "
+                            "3) Eğer sorgu hata döndürürse veya sonuç beklediğin gibi değilse, sorguyu düzeltip tekrar dene "
+                            "(bunun için birden fazla araç çağrısı yapabilirsin, bu tamamen normaldir). "
+                            "Teknik detayları, SQL kodlarını veya hangi aracı çalıştırdığını asla kullanıcıya söyleme. "
+                            "Doğrudan veritabanından aldığın verileri yorumlayıp nihai Türkçe cevabı ver. "
+                            "Eğer birkaç denemeden sonra hâlâ sonuç alamıyorsan, bunu dürüstçe kullanıcıya belirt."
+                        ),
                     },
                     {"role": "user", "content": user_input}
                 ]
 
-                # 1. Aşama: LLM'e soruyu ve araçları gönderiyoruz
-                response = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=agent_messages,
-                    tools=tools,
-                    tool_choice="auto",
-                    temperature=0.1
-                )
+                query_result_for_chart = pd.DataFrame()
+                final_response = None
+                MAX_TURNS = 6
 
-                response_message = response.choices[0].message
-                tool_calls = response_message.tool_calls
+                # DÜZELTME: Tek seferlik "sor -> cevapla" akışı yerine, model gerektiği
+                # kadar tool çağırıp kendini düzeltebilsin diye döngüye çevirdik.
+                for turn in range(MAX_TURNS):
+                    response = client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=agent_messages,
+                        tools=tools,
+                        tool_choice="auto",
+                        temperature=0.1
+                    )
 
-                query_result_for_chart = pd.DataFrame()  # Dinamik grafik çizimi için boş df
+                    response_message = response.choices[0].message
+                    agent_messages.append(response_message.model_dump())
 
-                # Eğer araç çağrısı varsa arka planda işletiyoruz
-                if tool_calls:
-                    agent_messages.append(response_message)  # LLM'in kararını geçmişe ekle
+                    tool_calls = response_message.tool_calls
+                    if not tool_calls:
+                        final_response = response_message.content
+                        break
 
-                    # Çağrılmak istenen tüm araçları sırayla çalıştır
                     for tool_call in tool_calls:
                         function_name = tool_call.function.name
                         function_args = json.loads(tool_call.function.arguments)
 
-                        # Aracı tetikleme
                         if function_name == "get_database_schema":
                             tool_output = veritabanı_semasını_getir()
                         elif function_name == "run_sql_query":
                             sql_to_run = function_args.get("sql_query")
                             tool_output = sql_sorgusu_calistir(sql_to_run)
-                            
-                            # Grafik çizimi ihtimaline karşı veriyi pandas dataframe'e alalım
+
                             if isinstance(tool_output, list) and len(tool_output) > 0:
                                 query_result_for_chart = pd.DataFrame(tool_output)
                         else:
                             tool_output = {"error": "Bilinmeyen fonksiyon."}
 
-                        # Fonksiyonun sonucunu LLM geçmişine ekliyoruz
                         agent_messages.append({
                             "tool_call_id": tool_call.id,
                             "role": "tool",
                             "name": function_name,
-                            "content": json.dumps(tool_output)
+                            # ensure_ascii=False -> Türkçe karakterler bozulmasın
+                            # default=str -> olası serialize edilemeyen tipler için güvenlik ağı
+                            "content": json.dumps(tool_output, ensure_ascii=False, default=str)
                         })
-
-                    # 2. Aşama: Elde edilen verilerle LLM'e tekrar gidip nihai cevabı ürettiriyoruz
-                    second_response = client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=agent_messages,
-                        temperature=0.1
-                    )
-                    final_response = second_response.choices[0].message.content
                 else:
-                    # Eğer doğrudan bir araç kullanmaya gerek duymadıysa gelen cevabı alıyoruz
-                    final_response = response_message.content
+                    final_response = (
+                        "Sorgunuzu birkaç adımda çözmeye çalıştım ama net bir sonuca ulaşamadım. "
+                        "Sorunuzu biraz daha netleştirebilir misiniz? (Örn: hangi tarih aralığı, hangi bölüm/malzeme?)"
+                    )
 
-                # Sadece ve sadece nihai sonucu ekrana basıyoruz (Ara/geçici metinler asla yazdırılmaz)
                 st.write(final_response)
 
-                # Dinamik Grafik Çizimi (Eğer kullanıcı grafik istediyse ve verimiz varsa)
                 grafik_kelimeleri = ["grafik", "görselleştir", "çiz", "chart", "plot", "bar"]
                 if (
                     any(x in user_input.lower() for x in grafik_kelimeleri)
@@ -660,7 +681,6 @@ if user_input:
                             data=query_result_for_chart, x=x_col, y=numeric_cols[0]
                         )
 
-                # Geçmişe kaydet
                 st.session_state.messages.append(
                     {"role": "assistant", "content": final_response}
                 )
