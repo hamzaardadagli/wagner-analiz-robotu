@@ -487,16 +487,20 @@ def uygula_tema():
         html, body{
             font-family:'Inter', sans-serif;
         }
-        p, span, div, label, li, td, th, input, textarea{
+        /* Sadece gerçek yazı içeriğini hedefle — ikon taşıyan elemanlara
+           (collapsedControl, stIconMaterial, avatar baloncukları, expander
+           oku vb.) KESİNLİKLE dokunma, aksi halde ikon fontu yerine
+           düz metin görünür (örn. "keyboard_double_arrow_right"). */
+        [data-testid="stMarkdownContainer"] p,
+        [data-testid="stMarkdownContainer"] li,
+        [data-testid="stMarkdownContainer"] span,
+        [data-testid="stMarkdownContainer"] strong,
+        [data-testid="stText"],
+        [data-testid="stChatInput"] textarea,
+        [data-testid="stChatInput"] textarea::placeholder,
+        .stButton>button,
+        label, input, textarea{
             font-family:'Inter', sans-serif;
-        }
-        /* İkon fontlarını (material-symbols, avatar baloncukları vb.) etkileme */
-        [class*="material-symbols"], [class*="material-icons"],
-        [data-testid="stIconMaterial"], [data-testid="stExpanderIcon"],
-        [data-testid="collapsedControl"] span,
-        [data-testid="stChatMessageAvatarUser"], [data-testid="stChatMessageAvatarAssistant"],
-        [data-testid="stChatMessageAvatarUser"] *, [data-testid="stChatMessageAvatarAssistant"] *{
-            font-family:initial !important;
         }
         [data-testid="stHeader"]{ background:transparent !important; }
         [data-testid="stToolbar"]{ display:none; }
