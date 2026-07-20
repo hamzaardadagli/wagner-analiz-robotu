@@ -503,7 +503,9 @@ def uygula_tema():
             font-family:'Inter', sans-serif;
         }
         [data-testid="stHeader"]{ background:transparent !important; }
-        [data-testid="stToolbar"]{ display:none; }
+        /* stToolbar kasıtlı olarak gizlenmiyor: sidebar'ı geri açan
+           kontrol bazı Streamlit sürümlerinde bu bileşenin içinde yer
+           alıyor, gizlersek sidebar bir daha açılamıyor. */
         .block-container, [data-testid="stMainBlockContainer"]{
             padding-top:2.5rem !important;
             max-width:1200px;
