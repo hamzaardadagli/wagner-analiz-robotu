@@ -484,8 +484,19 @@ def uygula_tema():
                 var(--bg-primary) !important;
             color:var(--text-primary) !important;
         }
-        html, body, *, *::before, *::after{
-            font-family:'Inter', sans-serif !important;
+        html, body{
+            font-family:'Inter', sans-serif;
+        }
+        p, span, div, label, li, td, th, input, textarea{
+            font-family:'Inter', sans-serif;
+        }
+        /* İkon fontlarını (material-symbols, avatar baloncukları vb.) etkileme */
+        [class*="material-symbols"], [class*="material-icons"],
+        [data-testid="stIconMaterial"], [data-testid="stExpanderIcon"],
+        [data-testid="collapsedControl"] span,
+        [data-testid="stChatMessageAvatarUser"], [data-testid="stChatMessageAvatarAssistant"],
+        [data-testid="stChatMessageAvatarUser"] *, [data-testid="stChatMessageAvatarAssistant"] *{
+            font-family:initial !important;
         }
         [data-testid="stHeader"]{ background:transparent !important; }
         [data-testid="stToolbar"]{ display:none; }
