@@ -442,8 +442,258 @@ def send_advanced_report_email(html_content, bar_png):
         return False
 
 
-st.set_page_config(page_title="Üretim & Ciro Analiz Robotu (AI)", layout="wide")
-st.title("🤖 GitHub & GPT-4o-Mini Destekli Analiz Robotu")
+st.set_page_config(page_title="Üretim & Ciro Analiz Robotu (AI)", layout="wide", page_icon="🤖")
+
+
+def uygula_tema():
+    """
+    Koyu, modern SaaS temasını uygular: lacivert/siyah zemin + kobalt mavi
+    ve bakır (kablo temasına gönderme) çift vurgu rengi. Streamlit'in
+    kendi bileşenlerini data-testid seçicileriyle hedefliyoruz çünkü
+    class isimleri sürümden sürüme değişebiliyor, data-testid daha kalıcı.
+    """
+    st.markdown(
+        """
+        <style>
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+        :root{
+            --bg-primary:#080B12;
+            --bg-panel:rgba(255,255,255,0.035);
+            --bg-panel-solid:#121826;
+            --border:rgba(255,255,255,0.09);
+            --border-strong:rgba(255,255,255,0.16);
+            --accent:#5B8CFF;
+            --accent-2:#8B5CFF;
+            --copper:#F0A63D;
+            --copper-soft:rgba(240,166,61,0.14);
+            --text-primary:#F1F3F9;
+            --text-muted:#8E97AC;
+            --success:#3ECF8E;
+            --danger:#FF6470;
+        }
+
+        /* ---- Kapsayan zemin: çoklu radial-gradient ile ambiyans ışığı ---- */
+        [data-testid="stAppViewContainer"],
+        [data-testid="stMain"],
+        .stApp{
+            background:
+                radial-gradient(1100px circle at 12% -8%, rgba(91,140,255,0.20), transparent 55%),
+                radial-gradient(900px circle at 105% 8%, rgba(139,92,255,0.14), transparent 50%),
+                radial-gradient(700px circle at 50% 110%, rgba(240,166,61,0.08), transparent 55%),
+                var(--bg-primary) !important;
+            color:var(--text-primary) !important;
+        }
+        html, body, *, *::before, *::after{
+            font-family:'Inter', sans-serif !important;
+        }
+        [data-testid="stHeader"]{ background:transparent !important; }
+        [data-testid="stToolbar"]{ display:none; }
+        .block-container, [data-testid="stMainBlockContainer"]{
+            padding-top:2.5rem !important;
+            max-width:1200px;
+        }
+
+        /* ---- Sidebar: koyu cam panel ---- */
+        [data-testid="stSidebar"]{
+            background:linear-gradient(180deg, #0D1220 0%, #0A0E18 100%) !important;
+            border-right:1px solid var(--border);
+        }
+        [data-testid="stSidebar"] *{ color:var(--text-primary) !important; }
+        [data-testid="stSidebar"] hr{ border-color:var(--border) !important; margin:1.2rem 0; }
+        [data-testid="stSidebar"] h1{ font-size:19px !important; }
+        [data-testid="stSidebar"] h3{ font-size:15px !important; color:var(--copper) !important; }
+        [data-testid="stSidebar"] p, [data-testid="stSidebar"] li{ color:var(--text-muted) !important; font-size:13.5px; }
+
+        /* ---- Başlıklar ---- */
+        h1,h2,h3{
+            font-family:'Space Grotesk', sans-serif !important;
+            letter-spacing:-0.02em;
+            font-weight:700 !important;
+        }
+
+        /* ---- Özel hero başlık bloğu ---- */
+        .app-header{ padding:6px 0 28px 0; }
+        .app-header .eyebrow{
+            font-family:'JetBrains Mono', monospace !important;
+            font-size:12px;
+            letter-spacing:0.18em;
+            text-transform:uppercase;
+            color:var(--copper);
+            margin-bottom:10px;
+            display:flex; align-items:center; gap:8px;
+        }
+        .app-header .eyebrow::before{
+            content:"";
+            width:7px; height:7px; border-radius:50%;
+            background:var(--copper);
+            box-shadow:0 0 10px 2px var(--copper);
+        }
+        .app-header h1{
+            font-size:36px !important;
+            margin:0 0 16px 0 !important;
+            background:linear-gradient(90deg, #FFFFFF 0%, #C9D6FF 55%, var(--accent) 100%);
+            -webkit-background-clip:text;
+            background-clip:text;
+            -webkit-text-fill-color:transparent;
+        }
+        .app-header .trace{
+            height:3px;
+            width:100%;
+            background:linear-gradient(90deg, var(--accent) 0%, var(--accent-2) 35%, var(--copper) 70%, transparent 100%);
+            border-radius:2px;
+            box-shadow:0 0 16px 0 rgba(91,140,255,0.5);
+        }
+
+        /* ---- Genel metin bileşenleri (glass card görünümü) ---- */
+        [data-testid="stMarkdownContainer"]{ color:var(--text-primary); }
+
+        /* ---- Butonlar (varsayılan / secondary) ---- */
+        .stButton>button, [data-testid="stFileUploader"] section button, [data-testid="baseButton-secondary"]{
+            background:rgba(255,255,255,0.04) !important;
+            color:var(--text-primary) !important;
+            border:1px solid var(--border-strong) !important;
+            border-radius:10px !important;
+            font-weight:600 !important;
+            padding:0.55rem 1.1rem !important;
+            transition:all 0.18s ease !important;
+            backdrop-filter:blur(6px);
+        }
+        .stButton>button:hover{
+            border-color:var(--accent) !important;
+            color:#fff !important;
+            box-shadow:0 0 0 1px var(--accent), 0 0 18px 0 rgba(91,140,255,0.45) !important;
+            transform:translateY(-1px);
+        }
+
+        /* ---- Primary buton: gradyan dolgu (CTA) ---- */
+        button[kind="primary"], [data-testid="baseButton-primary"]{
+            background:linear-gradient(90deg, var(--accent) 0%, var(--accent-2) 100%) !important;
+            color:#fff !important;
+            border:none !important;
+            border-radius:10px !important;
+            font-weight:700 !important;
+            box-shadow:0 4px 20px 0 rgba(91,140,255,0.35) !important;
+        }
+        button[kind="primary"]:hover, [data-testid="baseButton-primary"]:hover{
+            box-shadow:0 6px 26px 0 rgba(91,140,255,0.55) !important;
+            transform:translateY(-1px);
+        }
+
+        /* ---- Dosya yükleyici kutusu ---- */
+        [data-testid="stFileUploaderDropzone"]{
+            background:rgba(255,255,255,0.03) !important;
+            border:1.5px dashed var(--border-strong) !important;
+            border-radius:14px !important;
+            transition:border-color 0.18s ease;
+        }
+        [data-testid="stFileUploaderDropzone"]:hover{ border-color:var(--accent) !important; }
+
+        /* ---- Sohbet mesajları: kullanıcı / asistan ayrımı ---- */
+        [data-testid="stChatMessage"]{
+            background:rgba(255,255,255,0.035) !important;
+            border:1px solid var(--border);
+            border-radius:14px;
+            padding:10px 14px !important;
+            margin-bottom:10px;
+            backdrop-filter:blur(8px);
+        }
+        [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]){
+            border-left:3px solid var(--copper);
+        }
+        [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarAssistant"]){
+            border-left:3px solid var(--accent);
+        }
+
+        /* ---- Sohbet giriş kutusu ---- */
+        [data-testid="stChatInput"]{
+            background:rgba(255,255,255,0.045) !important;
+            border:1.5px solid var(--border-strong) !important;
+            border-radius:14px !important;
+            box-shadow:0 4px 24px rgba(0,0,0,0.25);
+        }
+        [data-testid="stChatInput"]:focus-within{
+            border-color:var(--accent) !important;
+            box-shadow:0 0 0 3px rgba(91,140,255,0.18) !important;
+        }
+        [data-testid="stChatInput"] textarea{ color:var(--text-primary) !important; }
+
+        /* ---- Uyarı / bilgi kutuları ---- */
+        [data-testid="stAlert"]{
+            border-radius:10px !important;
+            border:1px solid var(--border) !important;
+            backdrop-filter:blur(6px);
+        }
+
+        /* ---- Expander ---- */
+        [data-testid="stExpander"]{
+            background:rgba(255,255,255,0.03) !important;
+            border:1px solid var(--border) !important;
+            border-radius:12px !important;
+            overflow:hidden;
+        }
+
+        /* ---- Tablolar / dataframe ---- */
+        [data-testid="stDataFrame"], [data-testid="stTable"]{
+            border:1px solid var(--border);
+            border-radius:10px;
+            overflow:hidden;
+        }
+
+        /* ---- Sayısal veriler için mono font ---- */
+        [data-testid="stMetricValue"]{
+            font-family:'JetBrains Mono', monospace !important;
+            font-weight:700 !important;
+        }
+
+        /* ---- Bağlantılar ---- */
+        a, a:visited{ color:var(--accent) !important; }
+
+        /* ---- Kaydırma çubuğu ---- */
+        ::-webkit-scrollbar{ width:9px; height:9px; }
+        ::-webkit-scrollbar-track{ background:var(--bg-primary); }
+        ::-webkit-scrollbar-thumb{ background:var(--border-strong); border-radius:5px; }
+        ::-webkit-scrollbar-thumb:hover{ background:var(--accent); }
+
+        /* ---- Kenar çubuğundaki örnek soru kartları ---- */
+        .example-box{
+            background:rgba(255,255,255,0.035);
+            border:1px solid var(--border);
+            border-left:3px solid var(--copper);
+            border-radius:10px;
+            padding:11px 13px;
+            font-size:13px;
+            margin-bottom:9px;
+            color:var(--text-muted) !important;
+            transition:all 0.18s ease;
+        }
+        .example-box:hover{
+            border-left-color:var(--accent);
+            background:rgba(255,255,255,0.06);
+            transform:translateX(2px);
+        }
+
+        @media (prefers-reduced-motion: reduce){
+            .stButton>button, .example-box{ transition:none !important; transform:none !important; }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+uygula_tema()
+
+st.markdown(
+    """
+    <div class="app-header">
+        <div class="eyebrow">WAGNER KABLO · ÜRETİM ZEKÂSI</div>
+        <h1>🤖 Üretim &amp; Ciro Analiz Robotu</h1>
+        <div class="trace"></div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 st.sidebar.markdown("# 📁 Veri Kaynağı Güncelleme")
@@ -516,7 +766,7 @@ if not database_ready:
 st.sidebar.markdown("---")
 st.sidebar.markdown("# ⚙️ Manuel Kontrol Paneli")
 
-if st.sidebar.button("📊 Raporu Yeniden Mail At", key="btn_yonetici_raporu"):
+if st.sidebar.button("📊 Raporu Yeniden Mail At", key="btn_yonetici_raporu", type="primary", use_container_width=True):
     with st.spinner("Rapor hesaplanıyor ve gönderiliyor..."):
         try:
             report_content, bar_data = generate_advanced_manager_report()
@@ -531,11 +781,17 @@ st.sidebar.markdown("---")
 
 st.sidebar.markdown("""
 ### 📘 Deneyebileceğiniz Örnek Sorular:
-* 📉 *Son 3 yılın en kötü cirolu ayı hangisidir?*
-* 🏢 *Hangi bölüm (BOLUM) en yüksek ciroyu yaptı?*
-* ⚙️ *Toplam üretilen (URETILEN) malzeme adeti ne kadardır?*
-* ⚠️ *En çok fire veren ilk 3 bölüm hangisidir?*
+""")
 
+for ornek_soru in [
+    "📉 Son 3 yılın en kötü cirolu ayı hangisidir?",
+    "🏢 Hangi bölüm (BOLUM) en yüksek ciroyu yaptı?",
+    "⚙️ Toplam üretilen (URETILEN) malzeme adeti ne kadardır?",
+    "⚠️ En çok fire veren ilk 3 bölüm hangisidir?",
+]:
+    st.sidebar.markdown(f'<div class="example-box">{ornek_soru}</div>', unsafe_allow_html=True)
+
+st.sidebar.markdown("""
 ---
 ### 🎯 Projenin Çalışma Prensibi
 Sistem, yüklenen Excel verilerini SQLite veritabanında arşivler ve yapay zeka aracılığıyla dilediğiniz analizleri yapmanızı sağlar.
